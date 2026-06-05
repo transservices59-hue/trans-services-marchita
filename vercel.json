@@ -9,7 +9,7 @@
   "crons": [
     {
       "path": "/api/cron/gps-check",
-      "schedule": "*/15 * * * *"
+      "schedule": "0 8 * * *"
     }
   ]
 }
