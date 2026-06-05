@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" width="192" height="192">
+  <!-- Fond -->
+  <rect width="192" height="192" rx="32" fill="#1B4F72"/>
+  <!-- Camion -->
+  <g transform="translate(18, 56)">
+    <!-- Carrosserie -->
+    <rect x="0" y="20" width="110" height="52" rx="6" fill="#ffffff"/>
+    <!-- Cabine -->
+    <rect x="110" y="8" width="48" height="64" rx="6" fill="#ffffff"/>
+    <!-- Fenêtre cabine -->
+    <rect x="118" y="16" width="30" height="28" rx="4" fill="#1B4F72"/>
+    <!-- Roue avant -->
+    <circle cx="136" cy="76" r="14" fill="#1B4F72" stroke="#ffffff" stroke-width="3"/>
+    <circle cx="136" cy="76" r="6" fill="#ffffff"/>
+    <!-- Roue arrière -->
+    <circle cx="36" cy="76" r="14" fill="#1B4F72" stroke="#ffffff" stroke-width="3"/>
+    <circle cx="36" cy="76" r="6" fill="#ffffff"/>
+    <circle cx="72" cy="76" r="14" fill="#1B4F72" stroke="#ffffff" stroke-width="3"/>
+    <circle cx="72" cy="76" r="6" fill="#ffffff"/>
+  </g>
+  <!-- Texte TSM -->
+  <text x="96" y="170" font-family="Arial,sans-serif" font-size="22" font-weight="bold"
+        fill="#E67E22" text-anchor="middle" letter-spacing="2">TSM</text>
+</svg>

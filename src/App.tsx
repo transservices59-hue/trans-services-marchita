@@ -7,6 +7,7 @@ import ClientDashboard from './pages/client/Dashboard';
 import ClientDossier from './pages/client/Dossier';
 import ClientPaiement from './pages/client/Paiement';
 import ClientPaiementSuccess from './pages/client/PaiementSuccess';
+import ClientSuivi from './pages/client/Suivi';
 import StoreDossiers from './pages/store/Dossiers';
 import StoreMap from './pages/store/Map';
 import StoreTransporteurs from './pages/store/Transporteurs';
@@ -28,6 +29,7 @@ export default function App() {
           {/* success avant :dossierId pour éviter le conflit de matching */}
           <Route path="paiement/success" element={<ClientPaiementSuccess />} />
           <Route path="paiement/:dossierId" element={<ClientPaiement />} />
+          <Route path="suivi/:id" element={<ClientSuivi />} />
         </Route>
 
         {/* Store (rôle : store) */}

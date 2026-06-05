@@ -53,6 +53,86 @@ app.use(
   })
 );
 
+import type { Request, Response, NextFunction } from 'express';
+import { buildDevisPDF, buildFacturePDF } from './pdf.js';
+import { notifyStatutChange } from './emails.js';
+
+// ── Middleware : vérification JWT Supabase ────────────────────────────────────
+
+const requireAuth = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  const auth = req.headers.authorization;
+  if (!auth?.startsWith('Bearer ')) { res.status(401).json({ error: 'Non authentifié' }); return; }
+  const { data: { user }, error } = await supabase.auth.getUser(auth.slice(7));
+  if (error || !user) { res.status(401).json({ error: 'Token invalide' }); return; }
+  (req as Request & { user: typeof user }).user = user;
+  next();
+};
+
+// ── GET /api/pdf/devis/:dossierId ─────────────────────────────────────────────
+
+app.get('/api/pdf/devis/:dossierId', requireAuth, async (req, res) => {
+  const { dossierId } = req.params;
+  const user = (req as Request & { user: { id: string } }).user;
+
+  try {
+    // Vérification accès : client ne voit que ses dossiers
+    const { data: profile } = await supabase
+      .from('profiles').select('role,id').eq('user_id', user.id).single();
+
+    if (!profile) { res.status(403).json({ error: 'Profil introuvable' }); return; }
+
+    if (profile.role !== 'store') {
+      const { data: dossier } = await supabase
+        .from('dossiers').select('client_id').eq('id', dossierId).single();
+      if (!dossier || dossier.client_id !== profile.id) {
+        res.status(403).json({ error: 'Accès refusé' }); return;
+      }
+    }
+
+    const buffer = await buildDevisPDF(dossierId);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="devis-${dossierId}.pdf"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(buffer);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Erreur PDF';
+    console.error('[pdf/devis]', msg);
+    res.status(500).json({ error: msg });
+  }
+});
+
+// ── GET /api/pdf/facture/:dossierId ───────────────────────────────────────────
+
+app.get('/api/pdf/facture/:dossierId', requireAuth, async (req, res) => {
+  const { dossierId } = req.params;
+  const user = (req as Request & { user: { id: string } }).user;
+
+  try {
+    const { data: profile } = await supabase
+      .from('profiles').select('role,id').eq('user_id', user.id).single();
+
+    if (!profile) { res.status(403).json({ error: 'Profil introuvable' }); return; }
+
+    if (profile.role !== 'store') {
+      const { data: dossier } = await supabase
+        .from('dossiers').select('client_id').eq('id', dossierId).single();
+      if (!dossier || dossier.client_id !== profile.id) {
+        res.status(403).json({ error: 'Accès refusé' }); return;
+      }
+    }
+
+    const buffer = await buildFacturePDF(dossierId);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="facture-${dossierId}.pdf"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(buffer);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Erreur PDF';
+    console.error('[pdf/facture]', msg);
+    res.status(500).json({ error: msg });
+  }
+});
+
 // ── POST /api/create-checkout ─────────────────────────────────────────────────
 
 app.post('/api/create-checkout', express.json(), async (req, res) => {
@@ -148,8 +228,10 @@ app.post('/api/stripe-webhook', express.raw({ type: '*/*' }), async (req, res) =
     console.log(`[webhook] 📋 Session ${session.id} | payment_intent : ${session.payment_intent} | dossierId : ${dossierId}`);
 
     if (!dossierId) {
-      console.error('[webhook] ❌ dossierId absent des metadata Stripe');
-      res.status(400).json({ error: 'dossierId manquant dans metadata' });
+      // On répond 200 pour éviter que Stripe réessaie indéfiniment.
+      // Un event sans dossierId est un event de test ou mal formé — on le logue et on passe.
+      console.warn('[webhook] ⚠️  dossierId absent des metadata — event ignoré (200 quand même)');
+      res.json({ received: true, warning: 'dossierId absent, event ignoré' });
       return;
     }
 
@@ -227,6 +309,28 @@ app.post('/api/stripe-webhook', express.raw({ type: '*/*' }), async (req, res) =
           console.error('[webhook] ❌ UPDATE facture_generee échoué :', finalErr.message);
         } else {
           console.log(`[webhook] 🎉 Terminé — dossier ${dossierId} → facture_generee | facture ${numero}`);
+
+          // Notification email client
+          const { data: fullDossier } = await supabase
+            .from('dossiers')
+            .select('client:profiles(email,prenom,nom), numero, montant_devis')
+            .eq('id', dossierId)
+            .single();
+
+          type FD = { client: { email: string; prenom: string }[]; numero: string; montant_devis: number } | null;
+          const fd = fullDossier as FD;
+          const clientRow = fd?.client?.[0] ?? null;
+
+          if (clientRow?.email) {
+            void notifyStatutChange({
+              statut:        'facture_generee',
+              clientEmail:   clientRow.email,
+              clientPrenom:  clientRow.prenom,
+              dossierNumero: fd?.numero ?? dossierId,
+              montantDevis:  fd?.montant_devis ?? 0,
+              factureNumero: numero,
+            });
+          }
         }
       }
     }

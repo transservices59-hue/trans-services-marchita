@@ -33,6 +33,7 @@ export default function StoreMap() {
   const [positions,  setPositions]  = useState<DernierePosition[]>([]);
   const [selected,   setSelected]   = useState<string | null>(null);
   const [loading,    setLoading]    = useState(true);
+  const polylines    = useRef<Record<string, L.Polyline>>({});
 
   // ── Initialiser la carte ────────────────────────────────────────────────────
   useEffect(() => {
@@ -57,15 +58,33 @@ export default function StoreMap() {
     };
   }, []);
 
-  // ── Charger les positions initiales ────────────────────────────────────────
+  // ── Charger les positions initiales + historique polyline ─────────────────
   useEffect(() => {
-    getDernieresPositions().then(({ data }) => {
+    getDernieresPositions().then(async ({ data }) => {
       const positions = (data as DernierePosition[]) ?? [];
       setPositions(positions);
       setLoading(false);
       if (!leafletMap.current) return;
 
       positions.forEach(pos => addOrUpdateMarker(pos));
+
+      // Charger l'historique GPS (100 dernières positions par transporteur)
+      for (const pos of positions) {
+        const { data: hist } = await supabase
+          .from('positions_gps')
+          .select('latitude,longitude')
+          .eq('transporteur_id', pos.transporteur_id)
+          .order('created_at', { ascending: true })
+          .limit(100);
+
+        if (hist && hist.length > 1 && leafletMap.current) {
+          const latlngs = (hist as { latitude: number; longitude: number }[])
+            .map(h => [h.latitude, h.longitude] as L.LatLngTuple);
+          const poly = L.polyline(latlngs, { color: '#1B4F72', weight: 2.5, opacity: 0.55 })
+            .addTo(leafletMap.current);
+          polylines.current[pos.transporteur_id] = poly;
+        }
+      }
 
       // Centrer la vue sur tous les marqueurs si possible
       const validPositions = positions.filter(p => p.latitude && p.longitude);
@@ -107,6 +126,12 @@ export default function StoreMap() {
             };
 
             addOrUpdateMarker(updated);
+
+            // Étendre la polyline du trajet
+            const poly = polylines.current[raw.transporteur_id];
+            if (poly) {
+              poly.addLatLng([raw.latitude, raw.longitude]);
+            }
 
             const next = [...prev];
             next[idx] = updated;

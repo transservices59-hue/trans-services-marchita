@@ -79,7 +79,7 @@ function DossierCard({ d }: { d: Dossier }) {
         )}
         {d.transporteur && (
           <button
-            onClick={e => { e.stopPropagation(); navigate(`/client/dossier/${d.id}`); }}
+            onClick={e => { e.stopPropagation(); navigate(`/client/suivi/${d.id}`); }}
             style={{
               background: C.primary, color: C.white, padding: '7px 16px',
               borderRadius: 6, fontSize: 13, fontWeight: 600,
