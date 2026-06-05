@@ -13,6 +13,7 @@ import StoreMap from './pages/store/Map';
 import StoreTransporteurs from './pages/store/Transporteurs';
 import StoreAudit from './pages/store/Audit';
 import StoreAnalytics from './pages/store/Analytics';
+import StoreDossierDetail from './pages/store/DossierDetail';
 import MFAEnroll from './pages/MFAEnroll';
 
 export default function App() {
@@ -40,6 +41,7 @@ export default function App() {
         <Route path="/store" element={<ProtectedRoute allowedRoles={['store']} />}>
           <Route index element={<Navigate to="dossiers" replace />} />
           <Route path="dossiers" element={<StoreDossiers />} />
+          <Route path="dossier/:id" element={<StoreDossierDetail />} />
           <Route path="transporteurs" element={<StoreTransporteurs />} />
           <Route path="map" element={<StoreMap />} />
           <Route path="analytics" element={<StoreAnalytics />} />

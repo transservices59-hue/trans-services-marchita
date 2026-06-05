@@ -70,6 +70,7 @@ import { z } from 'zod';
 import { buildDevisPDF, buildFacturePDF } from './pdf.js';
 import { notifyStatutChange } from './emails.js';
 import { checkGPSAlerts, healthCheck } from './monitoring.js';
+import { sendReminders, sendWeeklyReport, runCleanup, notifySMSAssignment } from './automation.js';
 import { logAudit } from './audit.js';
 
 // ── Trust proxy (Vercel / reverse proxy) ──────────────────────────────────────
@@ -418,6 +419,151 @@ app.post('/api/stripe-webhook', express.raw({ type: '*/*' }), async (req, res) =
 
   // Répondre 200 à Stripe dans tous les cas pour éviter les retentatives
   res.json({ received: true });
+});
+
+// ── POST /api/store/dossiers/:id/assign — affecter transporteur + SMS ────────
+
+app.post('/api/store/dossiers/:id/assign', requireAuth, express.json(), async (req, res) => {
+  const { id }           = req.params;
+  const { transporteurId } = req.body as { transporteurId: string };
+  const user = (req as Request & { user: { id: string } }).user;
+
+  const { data: profile } = await supabase
+    .from('profiles').select('role').eq('user_id', user.id).single();
+  if (!profile || profile.role !== 'store') {
+    res.status(403).json({ error: 'Accès réservé au store' }); return;
+  }
+  if (!transporteurId) {
+    res.status(400).json({ error: 'transporteurId requis' }); return;
+  }
+
+  // Mettre à jour le dossier
+  const { error: upErr } = await supabase
+    .from('dossiers')
+    .update({ transporteur_id: transporteurId, statut:'en_transit', updated_at: new Date().toISOString() })
+    .eq('id', id);
+
+  if (upErr) { res.status(500).json({ error: upErr.message }); return; }
+
+  // Récupérer les infos pour SMS + email
+  const { data: dossier } = await supabase
+    .from('dossiers')
+    .select('*, client:profiles(*), transporteur:transporteurs(*)')
+    .eq('id', id).single();
+
+  let smsSent = false;
+  if (dossier) {
+    const trk = Array.isArray(dossier.transporteur) ? dossier.transporteur[0] : dossier.transporteur;
+    const cli = Array.isArray(dossier.client) ? dossier.client[0] : dossier.client;
+
+    if (trk?.telephone) {
+      smsSent = await notifySMSAssignment({
+        telephone:     trk.telephone,
+        dossierNumero: dossier.numero as string,
+        adresseDepart: dossier.adresse_depart as string,
+      });
+    } else if (cli?.email && trk?.nom) {
+      // Fallback email si pas de téléphone
+      void notifyStatutChange({
+        statut:          'en_transit',
+        clientEmail:     cli.email,
+        clientPrenom:    cli.prenom,
+        dossierNumero:   dossier.numero as string,
+        transporteurNom: trk.nom,
+        transporteurTel: trk.telephone ?? '',
+      });
+    }
+
+    if (cli?.email) {
+      void notifyStatutChange({
+        statut:          'en_transit',
+        clientEmail:     cli.email,
+        clientPrenom:    cli.prenom,
+        dossierNumero:   dossier.numero as string,
+        transporteurNom: trk?.nom ?? '',
+        transporteurTel: trk?.telephone ?? '',
+      });
+    }
+
+    void logAudit({ action:'TRANSPORTEUR_ASSIGNED', ressource:'dossiers', ressourceId: id,
+      details:{ transporteurId, smsSent } });
+  }
+
+  logger.info(`[assign] Transporteur ${transporteurId} affecté au dossier ${id}`, { smsSent });
+  res.json({ ok: true, smsSent });
+});
+
+// ── POST /api/notify/devis-envoye ─────────────────────────────────────────────
+
+app.post('/api/notify/devis-envoye', requireAuth, express.json(), async (req, res) => {
+  const { dossierId } = req.body as { dossierId: string };
+  if (!dossierId) { res.status(400).json({ error: 'dossierId requis' }); return; }
+
+  const { data: d } = await supabase
+    .from('dossiers')
+    .select('numero,montant_devis,client:profiles(email,prenom)')
+    .eq('id', dossierId).single();
+
+  if (d) {
+    const cli = Array.isArray(d.client) ? d.client[0] : d.client as {email:string;prenom:string}|null;
+    if (cli?.email) {
+      void notifyStatutChange({
+        statut: 'devis_attente_validation',
+        clientEmail:   cli.email,
+        clientPrenom:  cli.prenom,
+        dossierNumero: d.numero as string,
+        montantDevis:  (d.montant_devis as number) ?? 0,
+      });
+    }
+  }
+  res.json({ ok: true });
+});
+
+// ── GET /api/cron/reminders (quotidien 6h) ────────────────────────────────────
+
+app.get('/api/cron/reminders', async (req, res) => {
+  const cronSecret = process.env.CRON_SECRET;
+  if (cronSecret && req.headers.authorization !== `Bearer ${cronSecret}`) {
+    res.status(401).json({ error:'Unauthorized' }); return;
+  }
+  try {
+    const result = await sendReminders();
+    logger.info('[cron/reminders]', result);
+    res.json({ ok:true, ...result });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Error' });
+  }
+});
+
+// ── GET /api/cron/weekly-report (lundi 8h) ────────────────────────────────────
+
+app.get('/api/cron/weekly-report', async (req, res) => {
+  const cronSecret = process.env.CRON_SECRET;
+  if (cronSecret && req.headers.authorization !== `Bearer ${cronSecret}`) {
+    res.status(401).json({ error:'Unauthorized' }); return;
+  }
+  try {
+    await sendWeeklyReport();
+    res.json({ ok:true });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Error' });
+  }
+});
+
+// ── GET /api/cron/cleanup (quotidien 2h) ──────────────────────────────────────
+
+app.get('/api/cron/cleanup', async (req, res) => {
+  const cronSecret = process.env.CRON_SECRET;
+  if (cronSecret && req.headers.authorization !== `Bearer ${cronSecret}`) {
+    res.status(401).json({ error:'Unauthorized' }); return;
+  }
+  try {
+    const result = await runCleanup();
+    logger.info('[cron/cleanup]', result);
+    res.json({ ok:true, ...result });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Error' });
+  }
 });
 
 // ── GET /api/health ───────────────────────────────────────────────────────────

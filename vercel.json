@@ -7,9 +7,9 @@
     { "src": "/api/(.*)", "dest": "/server/index.ts" }
   ],
   "crons": [
-    {
-      "path": "/api/cron/gps-check",
-      "schedule": "0 8 * * *"
-    }
+    { "path": "/api/cron/gps-check",    "schedule": "0 8 * * *"   },
+    { "path": "/api/cron/reminders",    "schedule": "0 6 * * *"   },
+    { "path": "/api/cron/cleanup",      "schedule": "0 2 * * *"   },
+    { "path": "/api/cron/weekly-report","schedule": "0 8 * * 1"   }
   ]
 }
