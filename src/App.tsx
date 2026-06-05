@@ -11,6 +11,8 @@ import ClientSuivi from './pages/client/Suivi';
 import StoreDossiers from './pages/store/Dossiers';
 import StoreMap from './pages/store/Map';
 import StoreTransporteurs from './pages/store/Transporteurs';
+import StoreAudit from './pages/store/Audit';
+import MFAEnroll from './pages/MFAEnroll';
 
 export default function App() {
   return (
@@ -20,6 +22,7 @@ export default function App() {
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/demande" element={<DemandePage />} />
+        <Route path="/mfa/enroll" element={<MFAEnroll />} />
 
         {/* Client (rôle : client) */}
         <Route path="/client" element={<ProtectedRoute allowedRoles={['client']} />}>
@@ -38,6 +41,7 @@ export default function App() {
           <Route path="dossiers" element={<StoreDossiers />} />
           <Route path="transporteurs" element={<StoreTransporteurs />} />
           <Route path="map" element={<StoreMap />} />
+          <Route path="audit" element={<StoreAudit />} />
         </Route>
 
         {/* Tracker (rôle : transporter / broker) */}

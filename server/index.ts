@@ -54,8 +54,45 @@ app.use(
 );
 
 import type { Request, Response, NextFunction } from 'express';
+import rateLimit from 'express-rate-limit';
+import { z } from 'zod';
 import { buildDevisPDF, buildFacturePDF } from './pdf.js';
 import { notifyStatutChange } from './emails.js';
+import { logAudit } from './audit.js';
+
+// ── Trust proxy (Vercel / reverse proxy) ──────────────────────────────────────
+app.set('trust proxy', 1);
+
+// ── Rate limiters ─────────────────────────────────────────────────────────────
+
+const checkoutLimiter = rateLimit({
+  windowMs: 60_000, limit: 10,
+  standardHeaders: 'draft-7', legacyHeaders: false,
+  handler: (req, res) => {
+    void logAudit({ action:'RATE_LIMIT', ressource:'create-checkout', req,
+      details:{ ip: req.ip } });
+    res.status(429).json({ error:'Trop de requêtes. Réessayez dans une minute.', code:'RATE_LIMIT' });
+  },
+});
+
+const publicLimiter = rateLimit({
+  windowMs: 60_000, limit: 5,
+  standardHeaders: 'draft-7', legacyHeaders: false,
+  handler: (req, res) => {
+    void logAudit({ action:'RATE_LIMIT', ressource:'public', req, details:{ path: req.path } });
+    res.status(429).json({ error:'Trop de requêtes. Réessayez dans une minute.', code:'RATE_LIMIT' });
+  },
+});
+
+// ── Schémas Zod ───────────────────────────────────────────────────────────────
+
+const checkoutSchema = z.object({
+  dossierId:  z.string().uuid(),
+  montant:    z.number().positive().max(100_000),
+  email:      z.string().email().optional().or(z.literal('')),
+  successUrl: z.string().url(),
+  cancelUrl:  z.string().url(),
+});
 
 // ── Middleware : vérification JWT Supabase ────────────────────────────────────
 
@@ -135,19 +172,44 @@ app.get('/api/pdf/facture/:dossierId', requireAuth, async (req, res) => {
 
 // ── POST /api/create-checkout ─────────────────────────────────────────────────
 
-app.post('/api/create-checkout', express.json(), async (req, res) => {
+app.post('/api/create-checkout', checkoutLimiter, express.json(), async (req, res) => {
   console.log('[create-checkout] 📥 Requête reçue');
   try {
-    const { dossierId, montant, email, successUrl, cancelUrl } = req.body as {
-      dossierId: string;
-      montant:   number;
-      email?:    string;
-      successUrl: string;
-      cancelUrl:  string;
-    };
+    // ── Validation Zod ──────────────────────────────────────────────────────
+    const parsed = checkoutSchema.safeParse(req.body);
+    if (!parsed.success) {
+      const issue  = parsed.error.issues?.[0] ?? (parsed.error as unknown as { issues: { path: unknown[]; message: string }[] }).issues?.[0];
+      const field   = issue?.path?.[0] as string | undefined;
+      const message = issue?.message ?? 'Données invalides';
+      res.status(400).json({ error: message, field });
+      return;
+    }
 
-    if (!dossierId || !montant || !successUrl || !cancelUrl) {
-      res.status(400).json({ error: 'Paramètres manquants' });
+    const { dossierId, montant, email, successUrl, cancelUrl } = parsed.data;
+
+    // ── Anti-tampering : vérifier le montant en base ────────────────────────
+    const { data: dbDossier } = await supabase
+      .from('dossiers')
+      .select('montant_devis, statut')
+      .eq('id', dossierId)
+      .single();
+
+    if (!dbDossier) {
+      res.status(404).json({ error: 'Dossier introuvable', field: 'dossierId' });
+      return;
+    }
+
+    if (['paye','facture_generee'].includes(dbDossier.statut as string)) {
+      res.status(400).json({ error: 'Ce dossier est déjà payé' });
+      return;
+    }
+
+    const dbMontant = dbDossier.montant_devis as number ?? 0;
+    if (Math.abs(dbMontant - montant) > 0.01) {
+      console.error(`[checkout] TAMPERING détecté : client=${montant}, DB=${dbMontant}, dossier=${dossierId}`);
+      void logAudit({ action:'TAMPERING_ATTEMPT', ressource:'create-checkout', req,
+        details:{ dossierId, montantClient: montant, montantDB: dbMontant } });
+      res.status(400).json({ error: 'Montant invalide', field: 'montant' });
       return;
     }
 
@@ -172,6 +234,9 @@ app.post('/api/create-checkout', express.json(), async (req, res) => {
     });
 
     console.log(`[create-checkout] ✅ Session créée : ${session.id}`);
+    void logAudit({ action:'CHECKOUT_CREATED', ressource:'checkout', req,
+      ressourceId: dossierId,
+      details:{ sessionId: session.id, montant, email } });
     res.json({ url: session.url });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Erreur inconnue';
@@ -221,6 +286,9 @@ app.post('/api/stripe-webhook', express.raw({ type: '*/*' }), async (req, res) =
   console.log(`[webhook] ✅ Signature valide — event : ${event.type}`);
 
   // ── 3. Traitement de l'événement ─────────────────────────────────────────
+  void logAudit({ action:'WEBHOOK_RECEIVED', ressource:'webhook',
+    details:{ type: event.type, id: event.id } });
+
   if (event.type === 'checkout.session.completed') {
     const session   = event.data.object as Stripe.Checkout.Session;
     const dossierId = session.metadata?.dossierId;
