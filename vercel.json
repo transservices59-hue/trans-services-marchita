@@ -6,6 +6,14 @@
   "routes": [
     { "src": "/api/(.*)", "dest": "/server/index.ts" }
   ],
+  "redirects": [
+    {
+      "source": "/(.*)",
+      "has": [{ "type": "host", "value": "www.transservices.fr" }],
+      "destination": "https://app.transservices.fr/$1",
+      "permanent": true
+    }
+  ],
   "crons": [
     { "path": "/api/cron/gps-check",    "schedule": "0 8 * * *"   },
     { "path": "/api/cron/reminders",    "schedule": "0 6 * * *"   },

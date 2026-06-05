@@ -41,27 +41,38 @@ export const validerDevis = (dossierId: string) =>
 // ─── Dossiers (store) ────────────────────────────────────────────────────────
 
 export interface DossierFilters {
-  statut?: string;
+  statut?:   string;
   typeColis?: string;
-  search?: string;
-  page?: number;
+  search?:   string;
+  // Cursor-based pagination (préféré) : created_at du dernier item de la page
+  cursor?:   string | null;
+  // Offset-based (conservé pour rétrocompat)
+  page?:     number;
   pageSize?: number;
 }
 
 export const getAllDossiers = (filters: DossierFilters = {}) => {
-  const { statut, typeColis, search, page = 1, pageSize = 20 } = filters;
-  const from = (page - 1) * pageSize;
-  const to = from + pageSize - 1;
+  const { statut, typeColis, search, cursor, page = 1, pageSize = 20 } = filters;
+  const useCursor = cursor !== undefined;
 
   let query = supabase
     .from('dossiers')
     .select('*, client:profiles(*), transporteur:transporteurs(*)', { count: 'exact' })
-    .order('created_at', { ascending: false })
-    .range(from, to);
+    .order('created_at', { ascending: false });
 
-  if (statut) query = query.eq('statut', statut);
+  if (useCursor) {
+    // Cursor-based : fetch pageSize+1 pour savoir s'il y a une suite
+    if (cursor) query = query.lt('created_at', cursor);
+    query = query.limit(pageSize + 1);
+  } else {
+    // Offset-based (rétrocompat)
+    const from = (page - 1) * pageSize;
+    query = query.range(from, from + pageSize - 1);
+  }
+
+  if (statut)    query = query.eq('statut', statut);
   if (typeColis) query = query.eq('type_colis', typeColis);
-  if (search) query = query.or(`numero.ilike.%${search}%`);
+  if (search)    query = query.or(`numero.ilike.%${search}%`);
 
   return query;
 };
