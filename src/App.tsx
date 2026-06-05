@@ -12,6 +12,7 @@ import StoreDossiers from './pages/store/Dossiers';
 import StoreMap from './pages/store/Map';
 import StoreTransporteurs from './pages/store/Transporteurs';
 import StoreAudit from './pages/store/Audit';
+import StoreAnalytics from './pages/store/Analytics';
 import MFAEnroll from './pages/MFAEnroll';
 
 export default function App() {
@@ -41,6 +42,7 @@ export default function App() {
           <Route path="dossiers" element={<StoreDossiers />} />
           <Route path="transporteurs" element={<StoreTransporteurs />} />
           <Route path="map" element={<StoreMap />} />
+          <Route path="analytics" element={<StoreAnalytics />} />
           <Route path="audit" element={<StoreAudit />} />
         </Route>
 

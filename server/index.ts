@@ -1,14 +1,24 @@
 // ─── Chargement des variables d'environnement ────────────────────────────────
-// On charge .env puis .env.local (override=true) pour couvrir les deux
-// conventions : vars Vite (VITE_SUPABASE_URL) et vars server (SUPABASE_URL).
 import dotenv from 'dotenv';
-dotenv.config();                                          // .env baseline
-dotenv.config({ path: '.env.local', override: true });   // .env.local override
+dotenv.config();
+dotenv.config({ path: '.env.local', override: true });
+
+// ─── Sentry (doit être initialisé AVANT tout le reste) ───────────────────────
+import * as Sentry from '@sentry/node';
+
+if (process.env.SENTRY_DSN) {
+  Sentry.init({
+    dsn:              process.env.SENTRY_DSN,
+    environment:      process.env.NODE_ENV ?? 'development',
+    tracesSampleRate: 0.1,
+  });
+}
 
 import express from 'express';
 import cors from 'cors';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
+import { logger, requestLogger } from './logger.js';
 
 // ── Résolution des variables (noms alternatifs tolérés) ───────────────────────
 const STRIPE_SECRET_KEY     = process.env.STRIPE_SECRET_KEY;
@@ -52,12 +62,14 @@ app.use(
     credentials: true,
   })
 );
+app.use(requestLogger);
 
 import type { Request, Response, NextFunction } from 'express';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { buildDevisPDF, buildFacturePDF } from './pdf.js';
 import { notifyStatutChange } from './emails.js';
+import { checkGPSAlerts, healthCheck } from './monitoring.js';
 import { logAudit } from './audit.js';
 
 // ── Trust proxy (Vercel / reverse proxy) ──────────────────────────────────────
@@ -408,14 +420,69 @@ app.post('/api/stripe-webhook', express.raw({ type: '*/*' }), async (req, res) =
   res.json({ received: true });
 });
 
+// ── GET /api/health ───────────────────────────────────────────────────────────
+
+app.get('/api/health', async (_req, res) => {
+  const result = await healthCheck();
+  res.status(result.db ? 200 : 503).json({ status: result.db ? 'ok' : 'degraded', ...result });
+});
+
+// ── GET /api/admin/gps-alerts (store uniquement) ──────────────────────────────
+
+app.get('/api/admin/gps-alerts', requireAuth, async (req, res) => {
+  const user = (req as Request & { user: { id: string } }).user;
+  const { data: profile } = await supabase
+    .from('profiles').select('role').eq('user_id', user.id).single();
+
+  if (!profile || profile.role !== 'store') {
+    res.status(403).json({ error: 'Accès réservé au store' }); return;
+  }
+
+  try {
+    const result = await checkGPSAlerts();
+    res.json(result);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Erreur monitoring';
+    res.status(500).json({ error: msg });
+  }
+});
+
+// ── GET /api/cron/gps-check (Vercel Cron — toutes les 15 min) ────────────────
+
+app.get('/api/cron/gps-check', async (req, res) => {
+  // Vercel Cron envoie Authorization: Bearer CRON_SECRET
+  const cronSecret = process.env.CRON_SECRET;
+  const authHeader = req.headers.authorization;
+
+  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+    logger.warn('[cron] Unauthorized GPS check attempt', { ip: req.ip });
+    res.status(401).json({ error: 'Unauthorized' }); return;
+  }
+
+  try {
+    logger.info('[cron] GPS check triggered');
+    const result = await checkGPSAlerts();
+    logger.info('[cron] GPS check done', result);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Cron error';
+    logger.error('[cron] GPS check failed', { error: msg });
+    res.status(500).json({ error: msg });
+  }
+});
+
+// ── Sentry error handler (doit être le dernier middleware) ────────────────────
+
+if (process.env.SENTRY_DSN) {
+  Sentry.setupExpressErrorHandler(app);
+}
+
 // ── Démarrage local ───────────────────────────────────────────────────────────
 
 if (!process.env.VERCEL) {
   const PORT = process.env.PORT ?? 3003;
   app.listen(PORT, () => {
-    console.log(`🚀  API server  →  http://localhost:${PORT}`);
-    console.log('    POST /api/create-checkout');
-    console.log('    POST /api/stripe-webhook\n');
+    logger.info(`API server démarré sur http://localhost:${PORT}`);
   });
 }
 
