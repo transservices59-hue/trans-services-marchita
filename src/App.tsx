@@ -15,6 +15,9 @@ import StoreAudit from './pages/store/Audit';
 import StoreAnalytics from './pages/store/Analytics';
 import StoreDossierDetail from './pages/store/DossierDetail';
 import MFAEnroll from './pages/MFAEnroll';
+import LegalPage from './pages/Legal';
+import PrivacyPage from './pages/Privacy';
+import CookieBanner from './components/CookieBanner';
 
 export default function App() {
   return (
@@ -24,6 +27,8 @@ export default function App() {
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/demande" element={<DemandePage />} />
+        <Route path="/legal" element={<LegalPage />} />
+        <Route path="/privacy" element={<PrivacyPage />} />
         <Route path="/mfa/enroll" element={<MFAEnroll />} />
 
         {/* Client (rôle : client) */}
@@ -55,6 +60,8 @@ export default function App() {
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+
+      <CookieBanner />
     </BrowserRouter>
   );
 }

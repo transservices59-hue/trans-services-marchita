@@ -16,6 +16,7 @@ const ACCENT   = '#E67E22';
 const TEXT     = '#333333';
 const LIGHT    = '#888888';
 const SUCCESS  = '#155724';
+const BORDER   = '#DDDDDD';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface DevisItem  { label: string; montant: number }
@@ -146,16 +147,22 @@ function priceTable(doc: PDFKit.PDFDocument, items: DevisItem[], ht: number, y: 
   return y;
 }
 
-// ── Footer légal ──────────────────────────────────────────────────────────────
+// ── Footer légal — mentions obligatoires CGI Art. 289 ────────────────────────
+
+const SIRET      = process.env.COMPANY_SIRET      ?? 'SIRET : à compléter';
+const TVA_INTRA  = process.env.COMPANY_TVA_INTRA  ?? 'N° TVA : FR XX XXX XXX XXX';
+const CGV_URL    = (process.env.APP_URL ?? 'https://trans-services-marchita.vercel.app') + '/legal';
 
 function footer(doc: PDFKit.PDFDocument): void {
-  rule(doc, 782, LIGHT);
-  doc.font('Helvetica').fontSize(6.5).fillColor(LIGHT)
+  rule(doc, 775, LIGHT);
+  doc.font('Helvetica').fontSize(6).fillColor(LIGHT)
      .text(
-       'Trans Services Marchita — Conditions : paiement intégral avant expédition. ' +
-       'Délais indicatifs non contractuels. Responsabilité limitée à la valeur déclarée. ' +
-       'En cas de litige : Tribunal de Commerce de Paris.',
-       50, 788, { width: 495, align: 'center' }
+       `Trans Services Marchita · ${SIRET} · ${TVA_INTRA} · 12 rue des Transports, 93200 Saint-Denis\n` +
+       `Paiement à réception · Pénalités de retard : 3× taux légal (art. L.441-10 C.com.) · ` +
+       `Indemnité forfaitaire recouvrement : 40 € · Pas d'escompte pour paiement anticipé\n` +
+       `Responsabilité limitée à 8,33 DTS/kg (CMR Art. 23) · CGV : ${CGV_URL} · ` +
+       `Tribunal compétent : Tribunal de Commerce de Bobigny (93)`,
+       50, 780, { width: 495, align: 'center' }
      );
 }
 
@@ -302,4 +309,136 @@ export async function storePDF(
   }
 
   return url;
+}
+
+// ── API : Lettre de voiture CMR ───────────────────────────────────────────────
+// Convention relative au contrat de transport international de Marchandises
+// par Route (CMR), Genève 19 mai 1956.
+
+interface CMRData extends DossierFull {
+  transporteur: {
+    id: string; code: string; nom: string; telephone: string; type: string;
+  } | null;
+}
+
+export async function buildCMRPDF(dossierId: string): Promise<Buffer> {
+  const { data, error } = await supabase
+    .from('dossiers')
+    .select('*, client:profiles(*), devis_items(*), factures(*), transporteur:transporteurs(*)')
+    .eq('id', dossierId)
+    .single();
+  if (error || !data) throw new Error(`Dossier introuvable : ${error?.message}`);
+  const d = data as unknown as CMRData;
+
+  const trk = Array.isArray(d.transporteur) ? d.transporteur[0] : d.transporteur;
+  const cli = d.client;
+  const today = dateFr(new Date().toISOString());
+
+  return mkBuffer(doc => {
+    // ── En-tête CMR ──────────────────────────────────────────────────────────
+    doc.font('Helvetica-Bold').fontSize(13).fillColor(PRIMARY)
+       .text('LETTRE DE VOITURE INTERNATIONALE', 50, 40, { align: 'center', width: 495 });
+    doc.font('Helvetica-Bold').fontSize(9).fillColor(PRIMARY)
+       .text('CMR — Convention de Genève du 19 mai 1956', 50, 57, { align: 'center', width: 495 });
+    rule(doc, 72, PRIMARY, 1.5);
+
+    // Numéro dossier
+    doc.font('Helvetica-Bold').fontSize(9).fillColor(PRIMARY)
+       .text(`Dossier N° ${d.numero}`, 400, 40, { align: 'right', width: 145 });
+    doc.font('Helvetica').fontSize(8).fillColor(LIGHT)
+       .text(`Émis le ${today}`, 400, 53, { align: 'right', width: 145 });
+
+    // ── Grille CMR ────────────────────────────────────────────────────────────
+
+    let y = 80;
+    const COL1 = 50, COL2 = 280, W1 = 224, W2 = 265;
+
+    const box = (x: number, bY: number, w: number, h: number, num: string, label: string, content: string) => {
+      doc.rect(x, bY, w, h).strokeColor(BORDER).lineWidth(0.5).stroke();
+      doc.font('Helvetica-Bold').fontSize(7).fillColor(LIGHT)
+         .text(`${num}. ${label}`, x + 4, bY + 3, { width: w - 8 });
+      doc.font('Helvetica').fontSize(8.5).fillColor('#222')
+         .text(content || '—', x + 4, bY + 14, { width: w - 8, height: h - 18 });
+    };
+
+    // Ligne 1 : expéditeur / destinataire
+    const expContent = cli
+      ? `${cli.prenom} ${cli.nom}\n${cli.telephone}\n${cli.email}`
+      : d.adresse_depart;
+    box(COL1, y, W1, 65, '1', 'Expéditeur (nom, adresse, pays)', expContent);
+    box(COL2, y, W2, 65, '2', 'Destinataire (nom, adresse, pays)', d.adresse_arrivee);
+    y += 65;
+
+    // Ligne 2 : lieu de livraison / transporteur
+    box(COL1, y, W1, 50, '3', 'Lieu prévu pour la livraison de la marchandise', d.adresse_arrivee);
+    const trkContent = trk
+      ? `${trk.nom}\n${trk.code} · ${trk.type === 'camion' ? 'Camion' : 'Courtier'}\nTél : ${trk.telephone}`
+      : 'Transporteur non encore affecté';
+    box(COL2, y, W2, 50, '16', 'Transporteur (nom, adresse, pays)', trkContent);
+    y += 50;
+
+    // Ligne 3 : date/lieu chargement / documents joints
+    const villeDepart = d.adresse_depart.split(',')[0].trim();
+    box(COL1, y, W1, 40, '4', 'Date et lieu de prise en charge (pays, ville, date)', `${villeDepart} · ${today}`);
+    box(COL2, y, W2, 40, '5', 'Documents joints', 'Facture commerciale · Certificat conformité');
+    y += 40;
+
+    // Ligne 4 : marchandise
+    const marchandise = `${d.type_colis.toUpperCase()}${d.description ? ' — ' + d.description : ''}`;
+    box(COL1, y, 495, 50, '6-9', 'Nature de la marchandise · Marques et numéros · Emballage', marchandise);
+    y += 50;
+
+    // Ligne 5 : poids / nombre de colis / valeur déclarée
+    const poids  = d.poids_kg ? `${d.poids_kg} kg` : '— kg (non déclaré)';
+    const valeur = d.montant_devis ? eur(d.montant_devis) : '— (non déclarée)';
+    box(COL1, y, W1, 40, '11', 'Poids brut (kg)', poids);
+    box(COL2, y, W2, 40, '17', 'Valeur déclarée (art. 24 CMR)', valeur);
+    y += 40;
+
+    // Ligne 6 : instructions douane
+    box(COL1, y, 495, 35, '13', 'Instructions de l\'expéditeur / Instructions douanières',
+      'Marchandise destinée à un usage personnel. Exportation temporaire non applicable.');
+    y += 35;
+
+    // Ligne 7 : frais de transport
+    const frais = d.montant_devis ? eur(d.montant_devis) : '—';
+    box(COL1, y, W1, 35, '18-19', 'Frais de transport (payés par l\'expéditeur)', `Port payé : ${frais}`);
+    box(COL2, y, W2, 35, '15', 'Instructions pour remboursement', 'Néant');
+    y += 35;
+
+    // Ligne 8 : réserves
+    box(COL1, y, 495, 35, '18', 'Réserves et observations du transporteur',
+      'Reçu en apparente bonne état sans vérification du contenu.');
+    y += 35;
+
+    // ── Signatures ────────────────────────────────────────────────────────────
+    y += 8;
+    rule(doc, y, BORDER);
+    y += 6;
+
+    const sigW = 160;
+    const sigPositions = [
+      { x: 50,  label: 'Expéditeur' },
+      { x: 217, label: 'Transporteur' },
+      { x: 384, label: 'Destinataire' },
+    ];
+
+    sigPositions.forEach(({ x, label }) => {
+      doc.rect(x, y, sigW, 60).strokeColor(BORDER).lineWidth(0.5).stroke();
+      doc.font('Helvetica-Bold').fontSize(7).fillColor(LIGHT)
+         .text(label, x + 4, y + 3);
+      doc.font('Helvetica').fontSize(7).fillColor(LIGHT)
+         .text('Lieu, date et signature :', x + 4, y + 14)
+         .text('_______________', x + 4, y + 42);
+    });
+
+    y += 68;
+    rule(doc, y, LIGHT);
+    doc.font('Helvetica').fontSize(6).fillColor(LIGHT)
+       .text(
+         `CMR N° ${d.numero} · Trans Services Marchita · ${SIRET} · Émis le ${today} · ` +
+         'Cette lettre de voiture vaut contrat au sens de la Convention CMR (Genève, 19.05.1956).',
+         50, y + 4, { width: 495, align: 'center' }
+       );
+  });
 }

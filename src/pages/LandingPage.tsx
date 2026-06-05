@@ -257,8 +257,17 @@ export default function LandingPage() {
 
         </div>
 
-        <div style={{ borderTop: '1px solid rgba(255,255,255,.15)', marginTop: 40, paddingTop: 20, textAlign: 'center', fontSize: 13, opacity: 0.6 }}>
+        <div style={{ borderTop: '1px solid rgba(255,255,255,.15)', marginTop: 40, paddingTop: 20,
+          textAlign: 'center', fontSize: 13, opacity: 0.7 }}>
           © {new Date().getFullYear()} Trans Services Marchita — Tous droits réservés
+          {' · '}
+          <a href="/legal"   style={{ color: 'rgba(255,255,255,.8)', textDecoration: 'underline' }}>
+            CGV & Mentions légales
+          </a>
+          {' · '}
+          <a href="/privacy" style={{ color: 'rgba(255,255,255,.8)', textDecoration: 'underline' }}>
+            Politique de confidentialité
+          </a>
         </div>
       </footer>
 

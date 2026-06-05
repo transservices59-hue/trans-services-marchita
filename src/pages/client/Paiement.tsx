@@ -11,10 +11,11 @@ export default function Paiement() {
   const navigate      = useNavigate();
   const { user }      = useAuth();
 
-  const [dossier, setDossier]   = useState<Dossier | null>(null);
-  const [loading, setLoading]   = useState(true);
-  const [paying,  setPaying]    = useState(false);
-  const [error,   setError]     = useState<string | null>(null);
+  const [dossier,     setDossier]     = useState<Dossier | null>(null);
+  const [loading,     setLoading]     = useState(true);
+  const [paying,      setPaying]      = useState(false);
+  const [error,       setError]       = useState<string | null>(null);
+  const [cgvAccepted, setCgvAccepted] = useState(false);
 
   useEffect(() => {
     if (!dossierId) return;
@@ -116,6 +117,31 @@ export default function Paiement() {
           </div>
         </div>
 
+        {/* Checkbox CGV obligatoire */}
+        <label style={{
+          display: 'flex', alignItems: 'flex-start', gap: 10,
+          cursor: 'pointer', fontSize: 13, color: '#555', marginBottom: 20, lineHeight: 1.5,
+        }}>
+          <input
+            type="checkbox"
+            checked={cgvAccepted}
+            onChange={e => setCgvAccepted(e.target.checked)}
+            style={{ marginTop: 2, flexShrink: 0, width: 16, height: 16, accentColor: C.primary }}
+          />
+          <span>
+            J'ai lu et j'accepte les{' '}
+            <a href="/legal" target="_blank" rel="noopener noreferrer"
+               style={{ color: C.primary, fontWeight: 600 }}>
+              Conditions Générales de Vente
+            </a>
+            {' '}de Trans Services Marchita, ainsi que la{' '}
+            <a href="/privacy" target="_blank" rel="noopener noreferrer"
+               style={{ color: C.primary, fontWeight: 600 }}>
+              politique de confidentialité
+            </a>.
+          </span>
+        </label>
+
         {error && (
           <div style={{
             background: '#fdecea', border: `1px solid ${C.error}`, color: C.error,
@@ -127,9 +153,9 @@ export default function Paiement() {
 
         <button
           onClick={handlePay}
-          disabled={paying}
+          disabled={paying || !cgvAccepted}
           style={{
-            width: '100%', background: paying ? '#aaa' : '#635BFF',
+            width: '100%', background: paying || !cgvAccepted ? '#aaa' : '#635BFF',
             color: C.white, padding: '14px', borderRadius: 8,
             fontSize: 16, fontWeight: 700,
             cursor: paying ? 'not-allowed' : 'pointer',

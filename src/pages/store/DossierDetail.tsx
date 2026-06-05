@@ -134,7 +134,22 @@ export default function StoreDossierDetail() {
 
   const sc = STATUT_COLOR[dossier.statut] ?? {color:'#333',bg:'#eee'};
   const facture = dossier.factures?.[0];
-  const canAssign = ['valide','paye','facture_generee'].includes(dossier.statut);
+  const canAssign  = ['valide','paye','facture_generee'].includes(dossier.statut);
+  const hasTrk     = !!dossier.transporteur_id;
+
+  const downloadCMR = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    const res = await fetch(`/api/pdf/cmr/${dossier.id}`, {
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+    if (!res.ok) return;
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url;
+    a.download = `cmr-${dossier.numero}.pdf`; a.click();
+    URL.revokeObjectURL(url);
+  };
   const canSendDevis = ['en_attente','devis_envoye','devis_attente_validation','brouillon'].includes(dossier.statut);
   const canMarkLivré = dossier.statut === 'en_transit';
 
@@ -279,6 +294,21 @@ export default function StoreDossierDetail() {
                 </button>
                 <p style={{fontSize:11,color:'#aaa',marginTop:8}}>
                   Un SMS est envoyé au transporteur. Le client reçoit un email.
+                </p>
+              </Card>
+            )}
+
+            {/* Lettre de voiture CMR */}
+            {hasTrk && (
+              <Card title="Documents légaux">
+                <button onClick={downloadCMR}
+                  style={{ width:'100%', background:'#004085', color:'#fff',
+                    padding:10, borderRadius:7, fontWeight:600, fontSize:14 }}>
+                  📋 Télécharger lettre de voiture CMR
+                </button>
+                <p style={{ fontSize:11, color:'#aaa', marginTop:6 }}>
+                  Générée selon la Convention CMR de Genève (1956).
+                  Obligatoire pour tout transport international.
                 </p>
               </Card>
             )}

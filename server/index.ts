@@ -67,8 +67,9 @@ app.use(requestLogger);
 import type { Request, Response, NextFunction } from 'express';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
-import { buildDevisPDF, buildFacturePDF } from './pdf.js';
-import { notifyStatutChange } from './emails.js';
+import { buildDevisPDF, buildFacturePDF, buildCMRPDF } from './pdf.js';
+import { createHash } from 'crypto';
+import { notifyStatutChange, sendEmail } from './emails.js';
 import { checkGPSAlerts, healthCheck } from './monitoring.js';
 import { sendReminders, sendWeeklyReport, runCleanup, notifySMSAssignment } from './automation.js';
 import { logAudit } from './audit.js';
@@ -563,6 +564,92 @@ app.get('/api/cron/cleanup', async (req, res) => {
     res.json({ ok:true, ...result });
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : 'Error' });
+  }
+});
+
+// ── GET /api/pdf/cmr/:dossierId — Lettre de voiture CMR ──────────────────────
+
+app.get('/api/pdf/cmr/:dossierId', requireAuth, async (req, res) => {
+  const { dossierId } = req.params;
+  const user = (req as Request & { user: { id: string } }).user;
+
+  const { data: profile } = await supabase
+    .from('profiles').select('role,id').eq('user_id', user.id).single();
+  if (!profile) { res.status(403).json({ error: 'Accès refusé' }); return; }
+
+  // Store voit tout, client voit ses dossiers
+  if (profile.role !== 'store') {
+    const { data: d } = await supabase
+      .from('dossiers').select('client_id').eq('id', dossierId).single();
+    if (!d || d.client_id !== profile.id) {
+      res.status(403).json({ error: 'Accès refusé' }); return;
+    }
+  }
+
+  try {
+    const buffer = await buildCMRPDF(dossierId);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="cmr-${dossierId}.pdf"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(buffer);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Erreur CMR';
+    logger.error('[pdf/cmr]', { error: msg });
+    res.status(500).json({ error: msg });
+  }
+});
+
+// ── DELETE /api/rgpd/delete-account ──────────────────────────────────────────
+
+app.delete('/api/rgpd/delete-account', requireAuth, async (req, res) => {
+  const user = (req as Request & { user: { id: string; email?: string } }).user;
+
+  try {
+    logger.info('[rgpd] Suppression compte demandée', { userId: user.id });
+
+    // 1. Anonymiser le profil (conserver les dossiers pour obligations comptables 10 ans)
+    const hash = createHash('sha256').update(user.id + Date.now()).digest('hex').slice(0, 12);
+    const { error: profileErr } = await supabase
+      .from('profiles')
+      .update({
+        nom:       'Compte supprimé',
+        prenom:    'Compte supprimé',
+        email:     `deleted_${hash}@anonymous.local`,
+        telephone: '0000000000',
+      })
+      .eq('user_id', user.id);
+
+    if (profileErr) throw new Error(`Profile anonymization: ${profileErr.message}`);
+
+    // 2. Supprimer l'utilisateur Supabase Auth (via admin API)
+    const { error: authErr } = await supabase.auth.admin.deleteUser(user.id);
+    if (authErr) {
+      logger.warn('[rgpd] Auth delete failed (non bloquant)', { error: authErr.message });
+    }
+
+    // 3. Logger l'événement
+    void logAudit({
+      action: 'ACCOUNT_DELETED', ressource: 'profiles',
+      details: { hash, reason: 'user_request_gdpr' },
+    });
+
+    // 4. Email de confirmation (best-effort)
+    if (user.email) {
+      void sendEmail({
+        to:      user.email,
+        subject: 'Votre compte Trans Services Marchita a été supprimé',
+        html: `<p>Bonjour,</p>
+          <p>Conformément à votre demande, votre compte et vos données personnelles ont été supprimés.</p>
+          <p>Vos dossiers de transport sont conservés 10 ans pour obligations comptables, sans données nominatives.</p>
+          <p>— Trans Services Marchita</p>`,
+      });
+    }
+
+    res.json({ ok: true, message: 'Compte supprimé et données anonymisées.' });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Erreur suppression';
+    logger.error('[rgpd] Delete failed', { error: msg });
+    res.status(500).json({ error: msg });
   }
 });
 
