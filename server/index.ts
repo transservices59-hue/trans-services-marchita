@@ -612,6 +612,7 @@ app.post('/api/store/convert-demande', requireAuth, express.json(), async (req, 
   const { data: linkData, error: linkErr } = await supabase.auth.admin.generateLink({
     type:  'recovery',
     email: clientEmail,
+    options: { redirectTo: `${appUrl}/client` },
   });
   console.log('[convert] linkData :', JSON.stringify(linkData));
   if (linkErr) {
@@ -874,6 +875,7 @@ app.get('/api/test-bienvenue', async (_req, res) => {
   const { data: linkData, error: linkErr } = await supabase.auth.admin.generateLink({
     type:  'recovery',
     email: testEmail,
+    options: { redirectTo: `${appUrl}/client` },
   });
   console.log('[test-bienvenue] linkData :', JSON.stringify(linkData));
   if (linkErr) {
