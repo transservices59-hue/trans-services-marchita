@@ -35,6 +35,8 @@ console.log('  STRIPE_WEBHOOK_SECRET  :', STRIPE_WEBHOOK_SECRET
 console.log('  SUPABASE_URL           :', SUPABASE_URL    ? `${SUPABASE_URL} ✅`              : '❌ MANQUANT');
 console.log('  SUPABASE_SERVICE_KEY   :', SUPABASE_KEY
   ? `${SUPABASE_KEY.slice(0, 10)}… ✅`   : '❌ MANQUANT');
+console.log('  BREVO_API_KEY          :', process.env.BREVO_API_KEY
+  ? `${process.env.BREVO_API_KEY.slice(0, 20)}… ✅` : '❌ MANQUANT — emails inopérants');
 console.log('[server] ─────────────────────────────────────────────────\n');
 
 if (!STRIPE_SECRET_KEY)  throw new Error('STRIPE_SECRET_KEY manquant dans .env');
@@ -410,7 +412,7 @@ app.post('/api/stripe-webhook', express.raw({ type: '*/*' }), async (req, res) =
           const clientRow = fd?.client?.[0] ?? null;
 
           if (clientRow?.email) {
-            void notifyStatutChange({
+            await notifyStatutChange({
               statut:        'facture_generee',
               clientEmail:   clientRow.email,
               clientPrenom:  clientRow.prenom,
@@ -471,7 +473,7 @@ app.post('/api/store/dossiers/:id/assign', requireAuth, express.json(), async (r
       });
     } else if (cli?.email && trk?.nom) {
       // Fallback email si pas de téléphone
-      void notifyStatutChange({
+      await notifyStatutChange({
         statut:          'en_transit',
         clientEmail:     cli.email,
         clientPrenom:    cli.prenom,
@@ -482,7 +484,7 @@ app.post('/api/store/dossiers/:id/assign', requireAuth, express.json(), async (r
     }
 
     if (cli?.email) {
-      void notifyStatutChange({
+      await notifyStatutChange({
         statut:          'en_transit',
         clientEmail:     cli.email,
         clientPrenom:    cli.prenom,
@@ -614,7 +616,7 @@ app.post('/api/notify/devis-envoye', requireAuth, express.json(), async (req, re
   if (d) {
     const cli = Array.isArray(d.client) ? d.client[0] : d.client as {email:string;prenom:string}|null;
     if (cli?.email) {
-      void notifyStatutChange({
+      await notifyStatutChange({
         statut: 'devis_attente_validation',
         clientEmail:   cli.email,
         clientPrenom:  cli.prenom,
@@ -741,7 +743,7 @@ app.delete('/api/rgpd/delete-account', requireAuth, async (req, res) => {
 
     // 4. Email de confirmation (best-effort)
     if (user.email) {
-      void sendEmail({
+      await sendEmail({
         to:      user.email,
         subject: 'Votre compte Trans Services Marchita a été supprimé',
         html: `<p>Bonjour,</p>
@@ -757,6 +759,61 @@ app.delete('/api/rgpd/delete-account', requireAuth, async (req, res) => {
     logger.error('[rgpd] Delete failed', { error: msg });
     res.status(500).json({ error: msg });
   }
+});
+
+// ── GET /api/test-email — envoie un email de test et retourne la réponse Brevo ─
+
+app.get('/api/test-email', async (req, res) => {
+  const cronSecret = process.env.CRON_SECRET;
+  if (cronSecret && req.headers.authorization !== `Bearer ${cronSecret}`) {
+    res.status(401).json({ error: 'Unauthorized' }); return;
+  }
+
+  const apiKey = process.env.BREVO_API_KEY;
+  const keyInfo = apiKey ? `${apiKey.slice(0, 20)}… (${apiKey.length} chars)` : 'ABSENT';
+  logger.info(`[test-email] BREVO_API_KEY = ${keyInfo}`);
+
+  if (!apiKey) {
+    res.status(500).json({ error: 'BREVO_API_KEY absent', keyInfo }); return;
+  }
+
+  // Appel direct Brevo pour voir la réponse brute
+  let brevoStatus = 0;
+  let brevoBody   = '';
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10_000);
+    const brevoRes = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method:  'POST',
+      signal:  controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        'api-key':      apiKey,
+        'Connection':   'keep-alive',
+      },
+      body: JSON.stringify({
+        sender:      { name: 'Trans Services Marchita', email: 'trans.services59@gmail.com' },
+        to:          [{ email: 'cybermons3@gmail.com', name: 'Test' }],
+        subject:     `[TEST] Marchita ${new Date().toISOString()}`,
+        htmlContent: `<p>Email de test depuis Vercel production.</p><p>${new Date().toISOString()}</p>`,
+      }),
+    });
+    clearTimeout(timer);
+    brevoStatus = brevoRes.status;
+    brevoBody   = await brevoRes.text();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg, keyInfo });
+    return;
+  }
+
+  res.json({
+    ok:          brevoStatus >= 200 && brevoStatus < 300,
+    brevoStatus,
+    brevoBody,
+    keyInfo,
+    timestamp:   new Date().toISOString(),
+  });
 });
 
 // ── GET /api/health ───────────────────────────────────────────────────────────

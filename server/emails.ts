@@ -238,6 +238,8 @@ export async function sendEmail(payload: EmailPayload): Promise<void> {
     return;
   }
 
+  console.log(`[email] → Envoi à ${payload.to} | "${payload.subject}" | clé: ${apiKey.slice(0, 20)}…`);
+
   const body: Record<string, unknown> = {
     sender: FROM,
     to: [{ email: payload.to, name: payload.toName ?? payload.to }],
@@ -287,13 +289,13 @@ export async function sendEmail(payload: EmailPayload): Promise<void> {
     }
   }
 
+  const responseText = await res.text();
   if (!res.ok) {
-    const err = await res.text();
-    console.error(`[email] ❌ Brevo ${res.status} :`, err);
+    console.error(`[email] ❌ Brevo ${res.status} → ${payload.to} | body: ${responseText}`);
     return;
   }
 
-  console.log(`[email] ✅ Envoyé → ${payload.to} | "${payload.subject}"`);
+  console.log(`[email] ✅ Envoyé → ${payload.to} | "${payload.subject}" | Brevo: ${responseText}`);
 }
 
 // ── Helpers métier ────────────────────────────────────────────────────────────
