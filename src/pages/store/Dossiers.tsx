@@ -4,6 +4,21 @@ import { supabase, signOut } from '../../lib/supabase';
 import StoreNav from '../../components/StoreNav';
 import type { StatutDossier, TypeColis, Dossier } from '../../types';
 
+interface DemandePublique {
+  id: string;
+  nom: string;
+  prenom: string;
+  email: string;
+  telephone: string;
+  type_colis: string;
+  description: string;
+  adresse_depart: string;
+  adresse_arrivee: string;
+  poids_kg: number | null;
+  traitee: boolean;
+  created_at: string;
+}
+
 const C = { primary:'#1B4F72', accent:'#E67E22', bg:'#f5f7fa', white:'#fff', border:'#dde3ea' };
 const PAGE_SIZE = 20;
 
@@ -32,6 +47,41 @@ export default function StoreDossiers() {
   const [statut,    setStatut]    = useState('');
   const [typeColis, setType]      = useState('');
   const [search,    setSearch]    = useState('');
+
+  // ── Demandes publiques ────────────────────────────────────────────────────
+  const [demandes,        setDemandes]        = useState<DemandePublique[]>([]);
+  const [demandesLoading, setDemandesLoading] = useState(true);
+  const [converting,      setConverting]      = useState<string | null>(null);
+
+  const fetchDemandes = useCallback(async () => {
+    setDemandesLoading(true);
+    const { data } = await supabase
+      .from('demandes_publiques')
+      .select('*')
+      .eq('traitee', false)
+      .order('created_at', { ascending: false });
+    setDemandes((data ?? []) as DemandePublique[]);
+    setDemandesLoading(false);
+  }, []);
+
+  useEffect(() => { void fetchDemandes(); }, [fetchDemandes]);
+
+  const handleConvert = async (demandeId: string) => {
+    setConverting(demandeId);
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await window.fetch('/api/store/convert-demande', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
+      body:    JSON.stringify({ demandeId }),
+    });
+    const json = await res.json() as { ok?: boolean; dossierId?: string; error?: string };
+    if (json.ok && json.dossierId) {
+      navigate(`/store/dossier/${json.dossierId}`);
+    } else {
+      alert(json.error ?? 'Erreur lors de la conversion');
+      setConverting(null);
+    }
+  };
 
   // ── Cursor pagination ─────────────────────────────────────────────────────
   const [dossiers,    setDossiers]    = useState<Dossier[]>([]);
@@ -115,6 +165,81 @@ export default function StoreDossiers() {
       </header>
 
       <main style={{maxWidth:1200,margin:'0 auto',padding:'2rem'}}>
+
+        {/* ── Section Nouvelles demandes ───────────────────────────────────── */}
+        <div style={{marginBottom:32}}>
+          <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:14}}>
+            <h2 style={{fontSize:18,fontWeight:700,color:C.primary,margin:0}}>
+              Nouvelles demandes
+            </h2>
+            {!demandesLoading && demandes.length > 0 && (
+              <span style={{
+                background:'#dc2626',color:'#fff',borderRadius:20,
+                padding:'2px 10px',fontSize:12,fontWeight:700,
+              }}>
+                {demandes.length}
+              </span>
+            )}
+          </div>
+
+          {demandesLoading ? (
+            <p style={{color:'#888',fontSize:13}}>Chargement des demandes…</p>
+          ) : demandes.length === 0 ? (
+            <p style={{color:'#aaa',fontSize:13,fontStyle:'italic'}}>Aucune nouvelle demande.</p>
+          ) : (
+            <div style={{display:'flex',flexDirection:'column',gap:12}}>
+              {demandes.map(d => (
+                <div key={d.id} style={{
+                  background:C.white,border:`1px solid ${C.border}`,borderRadius:10,
+                  padding:'14px 18px',boxShadow:'0 1px 4px rgba(0,0,0,.06)',
+                  display:'grid',gridTemplateColumns:'1fr 1fr 1fr auto',gap:12,alignItems:'start',
+                }}>
+                  {/* Identité */}
+                  <div>
+                    <div style={{fontWeight:700,fontSize:14,color:C.primary}}>
+                      {d.prenom} {d.nom}
+                    </div>
+                    <div style={{fontSize:12,color:'#555',marginTop:2}}>{d.email}</div>
+                    <div style={{fontSize:12,color:'#555'}}>{d.telephone}</div>
+                    <div style={{fontSize:11,color:'#aaa',marginTop:4}}>
+                      {new Date(d.created_at).toLocaleDateString('fr-FR', {day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})}
+                    </div>
+                  </div>
+
+                  {/* Colis */}
+                  <div>
+                    <div style={{fontSize:12,fontWeight:600,color:'#555',textTransform:'capitalize'}}>{d.type_colis}{d.poids_kg ? ` — ${d.poids_kg} kg` : ''}</div>
+                    <div style={{fontSize:12,color:'#777',marginTop:4,whiteSpace:'pre-wrap',maxHeight:48,overflow:'hidden'}}>
+                      {d.description || '—'}
+                    </div>
+                  </div>
+
+                  {/* Adresses */}
+                  <div style={{fontSize:12,color:'#555'}}>
+                    <div><span style={{color:'#aaa'}}>De :</span> {d.adresse_depart || '—'}</div>
+                    <div style={{marginTop:4}}><span style={{color:'#aaa'}}>À :</span> {d.adresse_arrivee || '—'}</div>
+                  </div>
+
+                  {/* Bouton */}
+                  <button
+                    disabled={converting === d.id}
+                    onClick={() => void handleConvert(d.id)}
+                    style={{
+                      background: converting === d.id ? '#aaa' : C.accent,
+                      color:'#fff',padding:'8px 16px',borderRadius:7,
+                      fontWeight:700,fontSize:13,border:'none',
+                      cursor: converting === d.id ? 'not-allowed' : 'pointer',
+                      whiteSpace:'nowrap',alignSelf:'center',
+                    }}
+                  >
+                    {converting === d.id ? 'Conversion…' : 'Convertir en dossier →'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}}>
           <h1 style={{fontSize:22,fontWeight:700,color:C.primary}}>Tous les dossiers</h1>
           <span style={{fontSize:12,color:'#aaa'}}>Pagination cursor-based (performant sur grande table)</span>

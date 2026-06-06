@@ -68,7 +68,7 @@ import type { Request, Response, NextFunction } from 'express';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { buildDevisPDF, buildFacturePDF, buildCMRPDF } from './pdf.js';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { notifyStatutChange, sendEmail } from './emails.js';
 import { checkGPSAlerts, healthCheck } from './monitoring.js';
 import { sendReminders, sendWeeklyReport, runCleanup, notifySMSAssignment } from './automation.js';
@@ -498,6 +498,106 @@ app.post('/api/store/dossiers/:id/assign', requireAuth, express.json(), async (r
 
   logger.info(`[assign] Transporteur ${transporteurId} affecté au dossier ${id}`, { smsSent });
   res.json({ ok: true, smsSent });
+});
+
+// ── POST /api/store/convert-demande — convertit une demande publique en dossier
+
+app.post('/api/store/convert-demande', requireAuth, express.json(), async (req, res) => {
+  const { demandeId } = req.body as { demandeId: string };
+  const user = (req as Request & { user: { id: string } }).user;
+
+  const { data: storeProfile } = await supabase
+    .from('profiles').select('role').eq('user_id', user.id).single();
+  if (!storeProfile || storeProfile.role !== 'store') {
+    res.status(403).json({ error: 'Accès réservé au store' }); return;
+  }
+  if (!demandeId) {
+    res.status(400).json({ error: 'demandeId requis' }); return;
+  }
+
+  // 1. Récupérer la demande
+  const { data: demande } = await supabase
+    .from('demandes_publiques')
+    .select('*')
+    .eq('id', demandeId)
+    .eq('traitee', false)
+    .single();
+
+  if (!demande) {
+    res.status(404).json({ error: 'Demande introuvable ou déjà traitée' }); return;
+  }
+
+  // 2. Trouver ou créer le profil client
+  let clientProfileId: string;
+
+  const { data: existingProfile } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('email', demande.email as string)
+    .limit(1)
+    .maybeSingle();
+
+  if (existingProfile) {
+    clientProfileId = existingProfile.id as string;
+  } else {
+    // Créer le compte Supabase Auth (le trigger handle_new_user crée le profil)
+    const { data: authData, error: authErr } = await supabase.auth.admin.createUser({
+      email:          demande.email as string,
+      password:       randomUUID(),
+      email_confirm:  true,
+      user_metadata:  { nom: demande.nom, prenom: demande.prenom },
+    });
+
+    if (authErr || !authData.user) {
+      res.status(500).json({ error: authErr?.message ?? 'Erreur création compte client' }); return;
+    }
+
+    // Mettre à jour le profil créé par le trigger
+    await supabase.from('profiles')
+      .update({ nom: demande.nom, prenom: demande.prenom, telephone: demande.telephone })
+      .eq('user_id', authData.user.id);
+
+    const { data: newProfile } = await supabase
+      .from('profiles').select('id').eq('user_id', authData.user.id).single();
+
+    if (!newProfile) {
+      res.status(500).json({ error: 'Profil client introuvable après création' }); return;
+    }
+    clientProfileId = newProfile.id as string;
+  }
+
+  // 3. Créer le dossier (numero auto-généré par trigger)
+  const { data: dossier, error: dossierErr } = await supabase
+    .from('dossiers')
+    .insert({
+      client_id:       clientProfileId,
+      statut:          'en_attente',
+      type_colis:      demande.type_colis,
+      description:     demande.description  ?? '',
+      adresse_depart:  demande.adresse_depart  ?? '',
+      adresse_arrivee: demande.adresse_arrivee ?? '',
+      poids_kg:        demande.poids_kg ?? null,
+    })
+    .select('id')
+    .single();
+
+  if (dossierErr || !dossier) {
+    res.status(500).json({ error: dossierErr?.message ?? 'Erreur création dossier' }); return;
+  }
+
+  // 4. Marquer la demande comme traitée
+  await supabase.from('demandes_publiques')
+    .update({ traitee: true })
+    .eq('id', demandeId);
+
+  void logAudit({
+    action: 'DEMANDE_CONVERTED', ressource: 'demandes_publiques',
+    ressourceId: demandeId,
+    details: { dossierId: dossier.id, email: demande.email, clientProfileId },
+  });
+
+  logger.info(`[convert-demande] Demande ${demandeId} → dossier ${dossier.id as string}`);
+  res.json({ ok: true, dossierId: dossier.id });
 });
 
 // ── POST /api/notify/devis-envoye ─────────────────────────────────────────────
