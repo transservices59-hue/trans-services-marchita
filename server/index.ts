@@ -221,7 +221,11 @@ app.get('/api/pdf/facture/:dossierId', requireAuth, async (req, res) => {
 // ── POST /api/demandes — soumission formulaire public + devis auto ────────────
 
 app.post('/api/demandes', publicLimiter, async (req, res) => {
-  console.log('[demandes] ← requête reçue', req.method, req.path, 'body:', JSON.stringify(req.body));
+  console.log('[demandes] ← requête reçue', req.method, req.path);
+  console.log('[demandes] content-type:', req.headers['content-type']);
+  console.log('[demandes] body reçu:', JSON.stringify(req.body));
+  console.log('[demandes] origin:', req.headers.origin ?? '(absent)');
+
   const { nom, prenom, email, telephone, type_colis, description,
           adresse_depart, adresse_arrivee, poids_kg }
     = (req.body ?? {}) as Record<string, string | number | null | undefined>;

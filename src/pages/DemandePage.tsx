@@ -19,6 +19,16 @@ export default function DemandePage() {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    if (loading) return; // garde double-submit
+
+    // Conversion poids_kg : éviter NaN si champ vide ou non numérique
+    const poidsRaw = form.poids_kg.trim();
+    const poids    = poidsRaw !== '' && !isNaN(parseFloat(poidsRaw)) ? parseFloat(poidsRaw) : null;
+
+    const payload = { ...form, poids_kg: poids };
+
+    console.log('[demande] soumission', payload);
+
     setLoading(true);
     setError(null);
 
@@ -26,18 +36,24 @@ export default function DemandePage() {
       const res = await fetch('/api/demandes', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...form,
-          poids_kg: form.poids_kg ? parseFloat(form.poids_kg) : null,
-        }),
+        cache:   'no-store',   // bypass service worker cache
+        body:    JSON.stringify(payload),
       });
+
+      console.log('[demande] response status:', res.status, 'ok:', res.ok);
+
       const data = await res.json() as { ok?: boolean; error?: string; devisAuto?: boolean };
-      if (!res.ok || !data.ok) throw new Error(data.error ?? 'Erreur réseau');
+      console.log('[demande] response data:', JSON.stringify(data));
+
+      if (!res.ok || !data.ok) throw new Error(data.error ?? `Erreur serveur (${res.status})`);
+
       setDevisAuto(data.devisAuto ?? false);
       setSuccess(true);
     } catch (err) {
+      console.error('[demande] erreur catch:', err);
       setError(err instanceof Error ? err.message : 'Erreur réseau');
     }
+
     setLoading(false);
   };
 
