@@ -763,12 +763,7 @@ app.delete('/api/rgpd/delete-account', requireAuth, async (req, res) => {
 
 // ── GET /api/test-email — envoie un email de test et retourne la réponse Brevo ─
 
-app.get('/api/test-email', async (req, res) => {
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret && req.headers.authorization !== `Bearer ${cronSecret}`) {
-    res.status(401).json({ error: 'Unauthorized' }); return;
-  }
-
+app.get('/api/test-email', async (_req, res) => {
   const apiKey = process.env.BREVO_API_KEY;
   const keyInfo = apiKey ? `${apiKey.slice(0, 20)}… (${apiKey.length} chars)` : 'ABSENT';
   logger.info(`[test-email] BREVO_API_KEY = ${keyInfo}`);
