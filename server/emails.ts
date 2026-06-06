@@ -252,11 +252,40 @@ export async function sendEmail(payload: EmailPayload): Promise<void> {
     }));
   }
 
-  const res = await fetch(BREVO_URL, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json', 'api-key': apiKey },
-    body:    JSON.stringify(body),
-  });
+  const doFetch = async (): Promise<Response> => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8_000);
+    try {
+      return await fetch(BREVO_URL, {
+        method:  'POST',
+        signal:  controller.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          'api-key':      apiKey,
+          'Connection':   'keep-alive',
+        },
+        body: JSON.stringify(body),
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  let res: Response;
+  try {
+    res = await doFetch();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[email] ⚠️  Tentative 1 échouée (${msg}) — retry dans 1 s…`);
+    await new Promise(r => setTimeout(r, 1_000));
+    try {
+      res = await doFetch();
+    } catch (err2) {
+      const msg2 = err2 instanceof Error ? err2.message : String(err2);
+      console.error(`[email] ❌ Échec définitif après retry (${msg2}) → ${payload.to}`);
+      return;
+    }
+  }
 
   if (!res.ok) {
     const err = await res.text();
