@@ -75,10 +75,22 @@ const app = express();
 
 app.use(
   cors({
-    origin: ['http://localhost:3000', 'http://localhost:5173', /\.vercel\.app$/],
+    origin: [
+      'http://localhost:3000',
+      'http://localhost:5173',
+      /\.vercel\.app$/,
+      'https://app.transservices.fr',
+      'https://www.transservices.fr',
+      'https://trans-services-marchita.vercel.app',
+    ],
     credentials: true,
   })
 );
+// global json parser — avant toutes les routes sauf stripe-webhook (raw)
+app.use((req, _res, next) => {
+  if (req.path === '/api/stripe-webhook') { next(); return; }
+  express.json()(req, _res, next);
+});
 app.use(requestLogger);
 
 import type { Request, Response, NextFunction } from 'express';
@@ -208,10 +220,11 @@ app.get('/api/pdf/facture/:dossierId', requireAuth, async (req, res) => {
 
 // ── POST /api/demandes — soumission formulaire public + devis auto ────────────
 
-app.post('/api/demandes', publicLimiter, express.json(), async (req, res) => {
+app.post('/api/demandes', publicLimiter, async (req, res) => {
+  console.log('[demandes] ← requête reçue', req.method, req.path, 'body:', JSON.stringify(req.body));
   const { nom, prenom, email, telephone, type_colis, description,
           adresse_depart, adresse_arrivee, poids_kg }
-    = req.body as Record<string, string | number | null | undefined>;
+    = (req.body ?? {}) as Record<string, string | number | null | undefined>;
 
   if (!nom || !prenom || !email || !type_colis) {
     res.status(400).json({ error: 'Champs requis : nom, prenom, email, type_colis' }); return;
@@ -447,7 +460,7 @@ app.get('/api/create-checkout', (_req, res) => {
 
 // ── POST /api/create-checkout ─────────────────────────────────────────────────
 
-app.post('/api/create-checkout', checkoutLimiter, express.json(), async (req, res) => {
+app.post('/api/create-checkout', checkoutLimiter, async (req, res) => {
   console.log('[create-checkout] 📥 Requête reçue');
   try {
     // ── Validation Zod ──────────────────────────────────────────────────────
@@ -685,7 +698,7 @@ app.post('/api/stripe-webhook', express.raw({ type: '*/*' }), async (req, res) =
 
 // ── POST /api/store/dossiers/:id/assign — affecter transporteur + SMS ────────
 
-app.post('/api/store/dossiers/:id/assign', requireAuth, express.json(), async (req, res) => {
+app.post('/api/store/dossiers/:id/assign', requireAuth, async (req, res) => {
   const { id }           = req.params;
   const { transporteurId } = req.body as { transporteurId: string };
   const user = (req as Request & { user: { id: string } }).user;
@@ -757,7 +770,7 @@ app.post('/api/store/dossiers/:id/assign', requireAuth, express.json(), async (r
 
 // ── POST /api/store/convert-demande — convertit une demande publique en dossier
 
-app.post('/api/store/convert-demande', requireAuth, express.json(), async (req, res) => {
+app.post('/api/store/convert-demande', requireAuth, async (req, res) => {
   const { demandeId } = req.body as { demandeId: string };
   const user = (req as Request & { user: { id: string } }).user;
 
@@ -893,7 +906,7 @@ app.post('/api/store/convert-demande', requireAuth, express.json(), async (req, 
 
 // ── POST /api/store/devis/create — créer un devis officiel ───────────────────
 
-app.post('/api/store/devis/create', requireAuth, express.json(), async (req, res) => {
+app.post('/api/store/devis/create', requireAuth, async (req, res) => {
   const { demandeId, montantHT, tvaPct = 20, notes, validiteJours = 7 }
     = req.body as { demandeId: string; montantHT: number; tvaPct?: number; notes?: string; validiteJours?: number };
   const user = (req as Request & { user: { id: string } }).user;
@@ -1198,7 +1211,7 @@ app.get('/api/devis/refuser', async (req, res) => {
 
 // ── POST /api/notify/devis-envoye ─────────────────────────────────────────────
 
-app.post('/api/notify/devis-envoye', requireAuth, express.json(), async (req, res) => {
+app.post('/api/notify/devis-envoye', requireAuth, async (req, res) => {
   const { dossierId } = req.body as { dossierId: string };
   if (!dossierId) { res.status(400).json({ error: 'dossierId requis' }); return; }
 
