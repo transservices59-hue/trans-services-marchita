@@ -71,7 +71,7 @@ import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { buildDevisPDF, buildFacturePDF, buildCMRPDF } from './pdf.js';
 import { createHash, randomUUID } from 'crypto';
-import { notifyStatutChange, sendEmail } from './emails.js';
+import { notifyStatutChange, sendEmail, tplBienvenue } from './emails.js';
 import { checkGPSAlerts, healthCheck } from './monitoring.js';
 import { sendReminders, sendWeeklyReport, runCleanup, notifySMSAssignment } from './automation.js';
 import { logAudit } from './audit.js';
@@ -531,6 +531,7 @@ app.post('/api/store/convert-demande', requireAuth, express.json(), async (req, 
 
   // 2. Trouver ou créer le profil client
   let clientProfileId: string;
+  let isNewClient = false;
 
   const { data: existingProfile } = await supabase
     .from('profiles')
@@ -542,6 +543,7 @@ app.post('/api/store/convert-demande', requireAuth, express.json(), async (req, 
   if (existingProfile) {
     clientProfileId = existingProfile.id as string;
   } else {
+    isNewClient = true;
     // Créer le compte Supabase Auth (le trigger handle_new_user crée le profil)
     const { data: authData, error: authErr } = await supabase.auth.admin.createUser({
       email:          demande.email as string,
@@ -580,7 +582,7 @@ app.post('/api/store/convert-demande', requireAuth, express.json(), async (req, 
       adresse_arrivee: demande.adresse_arrivee ?? '',
       poids_kg:        demande.poids_kg ?? null,
     })
-    .select('id')
+    .select('id, numero')
     .single();
 
   if (dossierErr || !dossier) {
@@ -595,8 +597,35 @@ app.post('/api/store/convert-demande', requireAuth, express.json(), async (req, 
   void logAudit({
     action: 'DEMANDE_CONVERTED', ressource: 'demandes_publiques',
     ressourceId: demandeId,
-    details: { dossierId: dossier.id, email: demande.email, clientProfileId },
+    details: { dossierId: dossier.id, email: demande.email, clientProfileId, isNewClient },
   });
+
+  // 5. Email de bienvenue + lien reset password (nouveaux comptes uniquement)
+  if (isNewClient) {
+    const appUrl = process.env.APP_URL ?? 'https://trans-services-marchita.vercel.app';
+    const { data: linkData, error: linkErr } = await supabase.auth.admin.generateLink({
+      type:  'recovery',
+      email: demande.email as string,
+    });
+    if (linkErr) {
+      logger.warn('[convert-demande] generateLink échoué :', linkErr.message);
+    }
+    const resetLink = linkData?.properties?.action_link ?? `${appUrl}/login`;
+
+    await sendEmail({
+      to:     demande.email as string,
+      toName: demande.prenom as string,
+      subject: 'Votre espace Trans Services Marchita est prêt',
+      html: tplBienvenue({
+        prenom:    demande.prenom    as string,
+        email:     demande.email     as string,
+        numero:    dossier.numero    as string,
+        resetLink,
+        appUrl,
+      }),
+    });
+    logger.info(`[convert-demande] Email bienvenue envoyé → ${demande.email as string}`);
+  }
 
   logger.info(`[convert-demande] Demande ${demandeId} → dossier ${dossier.id as string}`);
   res.json({ ok: true, dossierId: dossier.id });

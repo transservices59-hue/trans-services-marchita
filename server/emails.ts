@@ -220,6 +220,47 @@ export function tplRelanceDevis(params: {
   `);
 }
 
+export function tplBienvenue(params: {
+  prenom: string;
+  email: string;
+  numero: string;
+  resetLink: string;
+  appUrl: string;
+}): string {
+  return wrapHtml(`
+    <h2 style="margin:0 0 12px;color:${LOGO_COLOR};">Bonjour ${params.prenom},</h2>
+    <p style="color:#555;font-size:15px;line-height:1.6;">
+      Votre dossier <strong>${params.numero}</strong> a &#xe9;t&#xe9; cr&#xe9;&#xe9; par notre &#xe9;quipe.<br>
+      Votre espace client est pr&#xea;t — vous pouvez d&#xe8;s maintenant suivre votre exp&#xe9;dition en temps r&#xe9;el.
+    </p>
+    <table width="100%" cellpadding="0" cellspacing="0"
+           style="background:#f0f4f8;border-radius:6px;padding:16px;margin:20px 0;">
+      <tr>
+        <td style="font-size:13px;color:#555;">Adresse email</td>
+        <td style="font-size:13px;font-weight:bold;text-align:right;">${params.email}</td>
+      </tr>
+      <tr>
+        <td style="font-size:13px;color:#555;padding-top:8px;">Dossier</td>
+        <td style="font-size:13px;font-weight:bold;color:${LOGO_COLOR};text-align:right;padding-top:8px;">
+          ${params.numero}
+        </td>
+      </tr>
+    </table>
+    <p style="color:#555;font-size:14px;line-height:1.6;">
+      D&#xe9;finissez votre mot de passe pour acc&#xe9;der &#xe0; votre espace :
+    </p>
+    ${btn('&#x1F511; D&#xe9;finir mon mot de passe', params.resetLink)}
+    <p style="font-size:12px;color:#aaa;margin-top:16px;">
+      Ce lien est valable 24 heures. Une fois connect&#xe9;, retrouvez votre dossier et suivez
+      votre exp&#xe9;dition en temps r&#xe9;el.
+    </p>
+    <p style="font-size:13px;color:#555;margin-top:8px;">
+      Votre espace client :
+      <a href="${params.appUrl}/client" style="color:${LOGO_COLOR};">${params.appUrl}/client</a>
+    </p>
+  `);
+}
+
 // ── Fonction d'envoi centralisée ──────────────────────────────────────────────
 
 export interface EmailPayload {
