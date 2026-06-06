@@ -1,7 +1,7 @@
 // Emails transactionnels via Brevo (REST API — pas de SDK requis)
 
 const BREVO_URL = 'https://api.brevo.com/v3/smtp/email';
-const FROM = { name: 'Trans Services Marchita', email: 'noreply@marchita-transport.fr' };
+const FROM = { name: 'Trans Services Marchita', email: 'trans.services59@gmail.com' };
 const LOGO_COLOR = '#1B4F72';
 const ACCENT     = '#E67E22';
 
