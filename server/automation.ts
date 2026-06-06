@@ -67,6 +67,30 @@ export async function sendReminders(): Promise<{ sent: number; errors: number; t
     }
   }
 
+  // ── Expiration devis_officiels ────────────────────────────────────────────
+  const { data: devisEnvoyes } = await supabase
+    .from('devis_officiels')
+    .select('id, demande_id, envoye_le, validite_jours')
+    .eq('statut', 'envoye')
+    .not('envoye_le', 'is', null);
+
+  const now = Date.now();
+  for (const d of devisEnvoyes ?? []) {
+    const expireAt = new Date(d.envoye_le as string).getTime()
+      + ((d.validite_jours as number) ?? 7) * 86_400_000;
+    if (now > expireAt) {
+      await supabase.from('devis_officiels')
+        .update({ statut: 'expire', updated_at: new Date().toISOString() })
+        .eq('id', d.id);
+      if (d.demande_id) {
+        await supabase.from('demandes_publiques')
+          .update({ statut: 'expiree' })
+          .eq('id', d.demande_id);
+      }
+      logger.info(`[reminders] Devis ${d.id as string} expiré`);
+    }
+  }
+
   return { sent, errors, total: rows.length };
 }
 

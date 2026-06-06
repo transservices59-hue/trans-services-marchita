@@ -75,7 +75,10 @@ import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { buildDevisPDF, buildFacturePDF, buildCMRPDF } from './pdf.js';
 import { createHash, randomUUID } from 'crypto';
-import { notifyStatutChange, sendEmail, tplBienvenue } from './emails.js';
+import {
+  notifyStatutChange, sendEmail, tplBienvenue,
+  tplDevisClient, tplDevisAccepteClient, tplDevisAccepteStore, tplDevisRefuseStore,
+} from './emails.js';
 import { checkGPSAlerts, healthCheck } from './monitoring.js';
 import { sendReminders, sendWeeklyReport, runCleanup, notifySMSAssignment } from './automation.js';
 import { logAudit } from './audit.js';
@@ -640,6 +643,306 @@ app.post('/api/store/convert-demande', requireAuth, express.json(), async (req, 
 
   logger.info(`[convert-demande] Demande ${demandeId} → dossier ${dossier.id as string}`);
   res.json({ ok: true, dossierId: dossier.id });
+});
+
+// ── POST /api/store/devis/create — créer un devis officiel ───────────────────
+
+app.post('/api/store/devis/create', requireAuth, express.json(), async (req, res) => {
+  const { demandeId, montantHT, tvaPct = 20, notes, validiteJours = 7 }
+    = req.body as { demandeId: string; montantHT: number; tvaPct?: number; notes?: string; validiteJours?: number };
+  const user = (req as Request & { user: { id: string } }).user;
+
+  const { data: storeProfile } = await supabase
+    .from('profiles').select('role').eq('user_id', user.id).single();
+  if (!storeProfile || storeProfile.role !== 'store') {
+    res.status(403).json({ error: 'Accès réservé au store' }); return;
+  }
+  if (!demandeId || !montantHT) {
+    res.status(400).json({ error: 'demandeId et montantHT requis' }); return;
+  }
+
+  // Vérifier qu'il n'y a pas déjà un devis 'envoye' actif
+  const { data: actif } = await supabase
+    .from('devis_officiels').select('id').eq('demande_id', demandeId).eq('statut', 'envoye').maybeSingle();
+  if (actif) {
+    res.status(409).json({ error: 'Un devis est déjà envoyé pour cette demande' }); return;
+  }
+
+  const montantTTC = Math.round(montantHT * (1 + tvaPct / 100) * 100) / 100;
+  const year   = new Date().getFullYear();
+  const seq    = String(Math.floor(Math.random() * 999_999) + 1).padStart(6, '0');
+  const numero = `DEV-${year}-${seq}`;
+
+  const { data: devis, error: devisErr } = await supabase
+    .from('devis_officiels')
+    .insert({
+      demande_id:        demandeId,
+      numero,
+      montant_ht:        montantHT,
+      tva_pct:           tvaPct,
+      montant_ttc:       montantTTC,
+      validite_jours:    validiteJours,
+      statut:            'brouillon',
+      notes:             notes ?? null,
+      token_acceptation: randomUUID(),
+      token_refus:       randomUUID(),
+    })
+    .select('*')
+    .single();
+
+  if (devisErr || !devis) {
+    res.status(500).json({ error: devisErr?.message ?? 'Erreur création devis' }); return;
+  }
+
+  await supabase.from('demandes_publiques')
+    .update({ statut: 'en_traitement' }).eq('id', demandeId);
+
+  logger.info(`[devis/create] Devis ${numero} créé pour demande ${demandeId}`);
+  res.json({ ok: true, devis });
+});
+
+// ── POST /api/store/devis/:id/envoyer — envoyer le devis au client ────────────
+
+app.post('/api/store/devis/:id/envoyer', requireAuth, async (req, res) => {
+  const { id } = req.params;
+  const user   = (req as Request & { user: { id: string } }).user;
+
+  const { data: storeProfile } = await supabase
+    .from('profiles').select('role').eq('user_id', user.id).single();
+  if (!storeProfile || storeProfile.role !== 'store') {
+    res.status(403).json({ error: 'Accès réservé au store' }); return;
+  }
+
+  const { data: devis } = await supabase
+    .from('devis_officiels').select('*').eq('id', id).single();
+  if (!devis) { res.status(404).json({ error: 'Devis introuvable' }); return; }
+  if (!['brouillon','modifie'].includes(devis.statut as string)) {
+    res.status(409).json({ error: `Devis déjà en statut '${devis.statut as string}'` }); return;
+  }
+
+  const { data: demande } = await supabase
+    .from('demandes_publiques').select('*').eq('id', devis.demande_id as string).single();
+  if (!demande) { res.status(404).json({ error: 'Demande introuvable' }); return; }
+
+  const appUrl = process.env.APP_URL ?? 'https://trans-services-marchita.vercel.app';
+  const acceptUrl = `${appUrl}/api/devis/accepter?token=${devis.token_acceptation as string}`;
+  const refuseUrl = `${appUrl}/api/devis/refuser?token=${devis.token_refus as string}`;
+
+  await sendEmail({
+    to:      demande.email as string,
+    toName:  demande.prenom as string,
+    subject: `Votre devis Trans Services Marchita — ${devis.numero as string}`,
+    html: tplDevisClient({
+      prenom:        demande.prenom   as string,
+      typeColis:     demande.type_colis as string,
+      adresseDepart: demande.adresse_depart  as string,
+      adresseArrivee:demande.adresse_arrivee as string,
+      numeroDevis:   devis.numero     as string,
+      montantHT:     devis.montant_ht as number,
+      tvaPct:        devis.tva_pct    as number,
+      montantTTC:    devis.montant_ttc as number,
+      validiteJours: devis.validite_jours as number,
+      acceptUrl,
+      refuseUrl,
+    }),
+  });
+
+  await supabase.from('devis_officiels')
+    .update({ statut: 'envoye', envoye_le: new Date().toISOString(), updated_at: new Date().toISOString() })
+    .eq('id', id);
+  await supabase.from('demandes_publiques')
+    .update({ statut: 'devis_envoye' }).eq('id', devis.demande_id as string);
+
+  logger.info(`[devis/envoyer] Devis ${devis.numero as string} envoyé → ${demande.email as string}`);
+  res.json({ ok: true });
+});
+
+// ── GET /api/devis/accepter?token=xxx — acceptation client (sans auth) ────────
+
+app.get('/api/devis/accepter', async (req, res) => {
+  const { token } = req.query as { token?: string };
+  const appUrl    = process.env.APP_URL ?? 'https://trans-services-marchita.vercel.app';
+
+  if (!token) { res.redirect(`${appUrl}/devis-refuse?erreur=lien-invalide`); return; }
+
+  const { data: devis } = await supabase
+    .from('devis_officiels').select('*').eq('token_acceptation', token).maybeSingle();
+
+  if (!devis) { res.redirect(`${appUrl}/devis-refuse?erreur=lien-invalide`); return; }
+
+  // Déjà accepté → retrouver le dossier existant
+  if (devis.statut === 'accepte') {
+    const { data: existing } = await supabase
+      .from('dossiers').select('numero').eq('devis_officiel_id', devis.id).maybeSingle();
+    const numero = (existing?.numero as string) ?? '';
+    res.redirect(`${appUrl}/devis-accepte?numero=${encodeURIComponent(numero)}&deja=1`); return;
+  }
+
+  if (devis.statut !== 'envoye') {
+    res.redirect(`${appUrl}/devis-refuse?erreur=devis-annule`); return;
+  }
+
+  // Vérifier expiration
+  const expireAt = new Date(devis.envoye_le as string).getTime()
+    + ((devis.validite_jours as number) ?? 7) * 86_400_000;
+  if (Date.now() > expireAt) {
+    await supabase.from('devis_officiels')
+      .update({ statut: 'expire', updated_at: new Date().toISOString() }).eq('id', devis.id);
+    res.redirect(`${appUrl}/devis-refuse?erreur=devis-expire`); return;
+  }
+
+  // Récupérer la demande
+  const { data: demande } = await supabase
+    .from('demandes_publiques').select('*').eq('id', devis.demande_id as string).single();
+  if (!demande) { res.redirect(`${appUrl}/devis-refuse?erreur=lien-invalide`); return; }
+
+  // Trouver ou créer profil client
+  let clientProfileId: string;
+  let isNewClient = false;
+
+  const { data: existingProfile } = await supabase
+    .from('profiles').select('id').eq('email', demande.email as string).limit(1).maybeSingle();
+
+  if (existingProfile) {
+    clientProfileId = existingProfile.id as string;
+  } else {
+    isNewClient = true;
+    const { data: authData, error: authErr } = await supabase.auth.admin.createUser({
+      email: demande.email as string, password: randomUUID(), email_confirm: true,
+      user_metadata: { nom: demande.nom, prenom: demande.prenom },
+    });
+    if (authErr || !authData.user) {
+      logger.error('[devis/accepter] createUser échoué :', authErr?.message);
+      res.redirect(`${appUrl}/devis-refuse?erreur=lien-invalide`); return;
+    }
+    await supabase.from('profiles')
+      .update({ nom: demande.nom, prenom: demande.prenom, telephone: demande.telephone })
+      .eq('user_id', authData.user.id);
+    const { data: newProfile } = await supabase
+      .from('profiles').select('id').eq('user_id', authData.user.id).single();
+    if (!newProfile) { res.redirect(`${appUrl}/devis-refuse?erreur=lien-invalide`); return; }
+    clientProfileId = newProfile.id as string;
+  }
+
+  // Créer le dossier
+  const { data: dossier, error: dossierErr } = await supabase
+    .from('dossiers')
+    .insert({
+      client_id:         clientProfileId,
+      statut:            'en_attente_paiement',
+      type_colis:        demande.type_colis,
+      description:       demande.description  ?? '',
+      adresse_depart:    demande.adresse_depart  ?? '',
+      adresse_arrivee:   demande.adresse_arrivee ?? '',
+      poids_kg:          demande.poids_kg ?? null,
+      montant_devis:     devis.montant_ttc,   // compatibilité Stripe
+      devis_officiel_id: devis.id,
+    })
+    .select('id, numero')
+    .single();
+
+  if (dossierErr || !dossier) {
+    logger.error('[devis/accepter] INSERT dossier échoué :', dossierErr?.message);
+    res.redirect(`${appUrl}/devis-refuse?erreur=lien-invalide`); return;
+  }
+
+  // Mise à jour statuts
+  await Promise.all([
+    supabase.from('devis_officiels')
+      .update({ statut: 'accepte', accepte_le: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq('id', devis.id),
+    supabase.from('demandes_publiques')
+      .update({ statut: 'acceptee', traitee: true }).eq('id', devis.demande_id as string),
+  ]);
+
+  // Email bienvenue client (nouveau compte uniquement)
+  if (isNewClient) {
+    const { data: linkData } = await supabase.auth.admin.generateLink({
+      type: 'recovery', email: demande.email as string,
+      options: { redirectTo: `${appUrl}/login` },
+    });
+    const resetLink = linkData?.properties?.action_link ?? `${appUrl}/login`;
+    await sendEmail({
+      to:      demande.email as string,
+      toName:  demande.prenom as string,
+      subject: 'Devis accepté — Créez votre espace client',
+      html: tplDevisAccepteClient({
+        prenom:         demande.prenom as string,
+        email:          demande.email  as string,
+        numeroDossier:  dossier.numero as string,
+        resetLink,
+        appUrl,
+      }),
+    });
+  }
+
+  // Email store
+  const storeEmail = process.env.STORE_ALERT_EMAIL ?? 'trans.services59@gmail.com';
+  await sendEmail({
+    to:      storeEmail,
+    subject: `Devis accepté — ${dossier.numero as string}`,
+    html: tplDevisAccepteStore({
+      clientNom:     `${demande.prenom as string} ${demande.nom as string}`,
+      clientEmail:   demande.email as string,
+      numeroDossier: dossier.numero as string,
+      dossierUrl:    `${appUrl}/store/dossier/${dossier.id as string}`,
+    }),
+  });
+
+  logger.info(`[devis/accepter] Dossier ${dossier.numero as string} créé (isNewClient=${String(isNewClient)})`);
+  res.redirect(`${appUrl}/devis-accepte?numero=${encodeURIComponent(dossier.numero as string)}`);
+});
+
+// ── GET /api/devis/refuser?token=xxx — refus client (sans auth) ───────────────
+
+app.get('/api/devis/refuser', async (req, res) => {
+  const { token } = req.query as { token?: string };
+  const appUrl    = process.env.APP_URL ?? 'https://trans-services-marchita.vercel.app';
+
+  if (!token) { res.redirect(`${appUrl}/devis-refuse?erreur=lien-invalide`); return; }
+
+  const { data: devis } = await supabase
+    .from('devis_officiels').select('*').eq('token_refus', token).maybeSingle();
+
+  if (!devis) { res.redirect(`${appUrl}/devis-refuse?erreur=lien-invalide`); return; }
+
+  if (devis.statut === 'refuse') {
+    res.redirect(`${appUrl}/devis-refuse?deja=1`); return;
+  }
+  if (devis.statut !== 'envoye') {
+    res.redirect(`${appUrl}/devis-refuse?erreur=devis-annule`); return;
+  }
+
+  const { data: demande } = await supabase
+    .from('demandes_publiques').select('*').eq('id', devis.demande_id as string).single();
+
+  await Promise.all([
+    supabase.from('devis_officiels')
+      .update({ statut: 'refuse', refuse_le: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq('id', devis.id),
+    demande
+      ? supabase.from('demandes_publiques').update({ statut: 'refusee' }).eq('id', demande.id)
+      : Promise.resolve(),
+  ]);
+
+  // Email store
+  if (demande) {
+    const storeEmail = process.env.STORE_ALERT_EMAIL ?? 'trans.services59@gmail.com';
+    await sendEmail({
+      to:      storeEmail,
+      subject: `Devis refusé — ${demande.prenom as string} ${demande.nom as string}`,
+      html: tplDevisRefuseStore({
+        clientNom:     `${demande.prenom as string} ${demande.nom as string}`,
+        clientEmail:   demande.email as string,
+        typeColis:     demande.type_colis as string,
+        adresseDepart: demande.adresse_depart as string,
+        demandeUrl:    `${appUrl}/store/dossiers`,
+      }),
+    });
+  }
+
+  logger.info(`[devis/refuser] Devis ${devis.id as string} refusé`);
+  res.redirect(`${appUrl}/devis-refuse`);
 });
 
 // ── POST /api/notify/devis-envoye ─────────────────────────────────────────────

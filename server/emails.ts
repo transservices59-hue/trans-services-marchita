@@ -67,6 +67,202 @@ function badge(label: string, color = LOGO_COLOR): string {
     color:#fff;font-size:12px;font-weight:bold;border-radius:20px;">${label}</span>`;
 }
 
+// ── Templates workflow devis ──────────────────────────────────────────────────
+
+export function tplDevisClient(params: {
+  prenom: string;
+  typeColis: string;
+  adresseDepart: string;
+  adresseArrivee: string;
+  numeroDevis: string;
+  montantHT: number;
+  tvaPct: number;
+  montantTTC: number;
+  validiteJours: number;
+  acceptUrl: string;
+  refuseUrl: string;
+}): string {
+  const tva = Math.round((params.montantTTC - params.montantHT) * 100) / 100;
+  return wrapHtml(`
+    <h2 style="margin:0 0 12px;color:${LOGO_COLOR};">Bonjour ${params.prenom},</h2>
+    <p style="color:#555;font-size:15px;line-height:1.6;">
+      Votre devis de transport est pr&#xea;t.<br>
+      Vous avez <strong>${params.validiteJours}&nbsp;jours</strong> pour l'accepter ou le refuser.
+    </p>
+    <table width="100%" cellpadding="0" cellspacing="0"
+           style="background:#f0f4f8;border-radius:6px;padding:16px;margin:20px 0;">
+      <tr>
+        <td style="font-size:13px;color:#555;">R&#xe9;f. devis</td>
+        <td style="font-size:13px;font-weight:bold;text-align:right;color:${LOGO_COLOR};">${params.numeroDevis}</td>
+      </tr>
+      <tr>
+        <td style="font-size:13px;color:#555;padding-top:8px;">Type de colis</td>
+        <td style="font-size:13px;font-weight:bold;text-align:right;padding-top:8px;text-transform:capitalize;">${params.typeColis}</td>
+      </tr>
+      <tr>
+        <td style="font-size:13px;color:#555;padding-top:8px;">D&#xe9;part</td>
+        <td style="font-size:13px;font-weight:bold;text-align:right;padding-top:8px;">${params.adresseDepart}</td>
+      </tr>
+      <tr>
+        <td style="font-size:13px;color:#555;padding-top:8px;">Arriv&#xe9;e</td>
+        <td style="font-size:13px;font-weight:bold;text-align:right;padding-top:8px;">${params.adresseArrivee}</td>
+      </tr>
+      <tr><td colspan="2" style="padding-top:12px;border-top:2px solid #dde3ea;"></td></tr>
+      <tr>
+        <td style="font-size:13px;color:#555;padding-top:4px;">Montant HT</td>
+        <td style="font-size:13px;text-align:right;padding-top:4px;">${params.montantHT.toFixed(2)}&nbsp;&euro;</td>
+      </tr>
+      <tr>
+        <td style="font-size:13px;color:#555;padding-top:4px;">TVA&nbsp;${params.tvaPct}%</td>
+        <td style="font-size:13px;text-align:right;padding-top:4px;">${tva.toFixed(2)}&nbsp;&euro;</td>
+      </tr>
+      <tr>
+        <td style="font-size:16px;font-weight:700;color:${LOGO_COLOR};padding-top:10px;">Total TTC</td>
+        <td style="font-size:18px;font-weight:700;color:${ACCENT};text-align:right;padding-top:10px;">
+          ${params.montantTTC.toFixed(2)}&nbsp;&euro;
+        </td>
+      </tr>
+    </table>
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin:24px 0;">
+      <tr>
+        <td style="padding:0 4px;">
+          <a href="${params.acceptUrl}"
+             style="display:block;padding:14px;background:#155724;color:#fff;
+                    font-size:15px;font-weight:bold;text-decoration:none;
+                    border-radius:6px;text-align:center;">
+            &#x2705;&nbsp;Accepter ce devis
+          </a>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:10px 4px 0;">
+          <a href="${params.refuseUrl}"
+             style="display:block;padding:10px;background:#f8d7da;color:#721c24;
+                    font-size:14px;font-weight:bold;text-decoration:none;
+                    border-radius:6px;text-align:center;border:1px solid #f5c6cb;">
+            &#x274C;&nbsp;Refuser
+          </a>
+        </td>
+      </tr>
+    </table>
+    <p style="font-size:12px;color:#aaa;">
+      Ce devis est valable ${params.validiteJours}&nbsp;jours &#xe0; compter de son envoi.
+      Pass&#xe9; ce d&#xe9;lai, il sera automatiquement annul&#xe9;.
+    </p>
+  `);
+}
+
+export function tplDevisAccepteClient(params: {
+  prenom: string;
+  email: string;
+  numeroDossier: string;
+  resetLink: string;
+  appUrl: string;
+}): string {
+  return wrapHtml(`
+    <div style="text-align:center;margin-bottom:24px;">
+      <div style="font-size:48px;">&#x2705;</div>
+      <h2 style="margin:8px 0;color:${LOGO_COLOR};">Devis accept&#xe9;&nbsp;!</h2>
+    </div>
+    <p style="color:#555;font-size:15px;line-height:1.6;">
+      Bonjour <strong>${params.prenom}</strong>,<br>
+      votre dossier <strong>${params.numeroDossier}</strong> a &#xe9;t&#xe9; cr&#xe9;&#xe9;.
+      Il ne reste plus qu'&#xe0; proc&#xe9;der au paiement pour lancer l'exp&#xe9;dition.
+    </p>
+    <table width="100%" cellpadding="0" cellspacing="0"
+           style="background:#f0f4f8;border-radius:6px;padding:16px;margin:20px 0;">
+      <tr>
+        <td style="font-size:13px;color:#555;">Adresse email</td>
+        <td style="font-size:13px;font-weight:bold;text-align:right;">${params.email}</td>
+      </tr>
+      <tr>
+        <td style="font-size:13px;color:#555;padding-top:8px;">Num&#xe9;ro de dossier</td>
+        <td style="font-size:13px;font-weight:bold;color:${LOGO_COLOR};text-align:right;padding-top:8px;">
+          ${params.numeroDossier}
+        </td>
+      </tr>
+    </table>
+    <p style="color:#555;font-size:14px;line-height:1.6;">
+      Cr&#xe9;ez votre mot de passe pour acc&#xe9;der &#xe0; votre espace et payer&nbsp;:
+    </p>
+    ${btn('&#x1F511;&nbsp;Cr&#xe9;er mon mot de passe', params.resetLink)}
+    <p style="font-size:12px;color:#aaa;margin-top:16px;">
+      Ce lien est valable&nbsp;24&nbsp;heures.
+    </p>
+  `);
+}
+
+export function tplDevisAccepteStore(params: {
+  clientNom: string;
+  clientEmail: string;
+  numeroDossier: string;
+  dossierUrl: string;
+}): string {
+  return wrapHtml(`
+    <h2 style="margin:0 0 12px;color:#155724;">&#x2705;&nbsp;Devis accept&#xe9;&nbsp;!</h2>
+    <p style="color:#555;font-size:15px;line-height:1.6;">
+      Un client a accept&#xe9; son devis. Un dossier a &#xe9;t&#xe9; cr&#xe9;&#xe9; automatiquement.
+    </p>
+    <table width="100%" cellpadding="0" cellspacing="0"
+           style="background:#d4edda;border:1px solid #c3e6cb;border-radius:6px;padding:16px;margin:20px 0;">
+      <tr>
+        <td style="font-size:13px;color:#555;">Client</td>
+        <td style="font-size:13px;font-weight:bold;text-align:right;">${params.clientNom}</td>
+      </tr>
+      <tr>
+        <td style="font-size:13px;color:#555;padding-top:8px;">Email</td>
+        <td style="font-size:13px;text-align:right;padding-top:8px;">${params.clientEmail}</td>
+      </tr>
+      <tr>
+        <td style="font-size:13px;color:#555;padding-top:8px;">Dossier cr&#xe9;&#xe9;</td>
+        <td style="font-size:13px;font-weight:bold;color:${LOGO_COLOR};text-align:right;padding-top:8px;">
+          ${params.numeroDossier}
+        </td>
+      </tr>
+    </table>
+    ${btn('&#x1F4C2;&nbsp;Voir le dossier', params.dossierUrl)}
+    <p style="font-size:13px;color:#555;margin-top:16px;">
+      Le client est en attente de paiement.
+    </p>
+  `);
+}
+
+export function tplDevisRefuseStore(params: {
+  clientNom: string;
+  clientEmail: string;
+  typeColis: string;
+  adresseDepart: string;
+  demandeUrl: string;
+}): string {
+  return wrapHtml(`
+    <h2 style="margin:0 0 12px;color:#721c24;">&#x274C;&nbsp;Devis refus&#xe9;</h2>
+    <p style="color:#555;font-size:15px;line-height:1.6;">
+      Un client a refus&#xe9; son devis.
+      Vous pouvez le recontacter pour proposer une nouvelle offre.
+    </p>
+    <table width="100%" cellpadding="0" cellspacing="0"
+           style="background:#fdecea;border:1px solid #f5c6cb;border-radius:6px;padding:16px;margin:20px 0;">
+      <tr>
+        <td style="font-size:13px;color:#555;">Client</td>
+        <td style="font-size:13px;font-weight:bold;text-align:right;">${params.clientNom}</td>
+      </tr>
+      <tr>
+        <td style="font-size:13px;color:#555;padding-top:8px;">Email</td>
+        <td style="font-size:13px;text-align:right;padding-top:8px;">${params.clientEmail}</td>
+      </tr>
+      <tr>
+        <td style="font-size:13px;color:#555;padding-top:8px;">Type de colis</td>
+        <td style="font-size:13px;text-align:right;padding-top:8px;text-transform:capitalize;">${params.typeColis}</td>
+      </tr>
+      <tr>
+        <td style="font-size:13px;color:#555;padding-top:8px;">D&#xe9;part</td>
+        <td style="font-size:13px;text-align:right;padding-top:8px;">${params.adresseDepart}</td>
+      </tr>
+    </table>
+    ${btn('&#x1F4CB;&nbsp;Voir la demande', params.demandeUrl)}
+  `);
+}
+
 // ── Templates par événement ───────────────────────────────────────────────────
 
 export function tplDemandeRecue(params: {

@@ -19,6 +19,9 @@ import LegalPage from './pages/Legal';
 import PrivacyPage from './pages/Privacy';
 import CookieBanner from './components/CookieBanner';
 import TrackerPage from './pages/transporter/Tracker';
+import DevisAccepte from './pages/DevisAccepte';
+import DevisRefuse from './pages/DevisRefuse';
+import StoreDemande from './pages/store/StoreDemande';
 
 export default function App() {
   return (
@@ -31,6 +34,8 @@ export default function App() {
         <Route path="/legal" element={<LegalPage />} />
         <Route path="/privacy" element={<PrivacyPage />} />
         <Route path="/mfa/enroll" element={<MFAEnroll />} />
+        <Route path="/devis-accepte" element={<DevisAccepte />} />
+        <Route path="/devis-refuse"  element={<DevisRefuse />} />
 
         {/* Client (rôle : client) */}
         <Route path="/client" element={<ProtectedRoute allowedRoles={['client']} />}>
@@ -51,7 +56,8 @@ export default function App() {
           <Route path="transporteurs" element={<StoreTransporteurs />} />
           <Route path="map" element={<StoreMap />} />
           <Route path="analytics" element={<StoreAnalytics />} />
-          <Route path="audit" element={<StoreAudit />} />
+          <Route path="audit"        element={<StoreAudit />} />
+          <Route path="demande/:id"  element={<StoreDemande />} />
         </Route>
 
         {/* Tracker (rôle : transporter / broker) */}

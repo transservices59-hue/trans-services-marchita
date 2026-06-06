@@ -30,6 +30,9 @@ const STATUT_LABEL: Record<StatutDossier,string> = {
   brouillon:'Brouillon', en_attente:'En attente', devis_envoye:'Devis envoyé',
   devis_attente_validation:'À valider', valide:'Validé', paye:'Payé',
   en_transit:'En transit', livre:'Livré', facture_generee:'Facturé', annule:'Annulé',
+  en_attente_paiement:'En attente paiement', en_preparation:'En préparation',
+  recu_store:'Reçu au store', arrive_maroc:'Arrivé au Maroc',
+  disponible_retrait:'Disponible retrait', litige:'Litige',
 };
 const STATUT_COLOR: Record<StatutDossier,{color:string;bg:string}> = {
   brouillon:{color:'#666',bg:'#f0f0f0'}, en_attente:{color:'#7B4F00',bg:'#FFF3CD'},
@@ -37,6 +40,9 @@ const STATUT_COLOR: Record<StatutDossier,{color:string;bg:string}> = {
   valide:{color:'#0c5460',bg:'#d1ecf1'}, paye:{color:'#155724',bg:'#c3e6cb'},
   en_transit:{color:'#533F03',bg:'#FFEEBA'}, livre:{color:'#155724',bg:'#b8dabe'},
   facture_generee:{color:'#4a235a',bg:'#e8d5f5'}, annule:{color:'#721c24',bg:'#F8D7DA'},
+  en_attente_paiement:{color:'#7B4F00',bg:'#FFF3CD'}, en_preparation:{color:'#004085',bg:'#CCE5FF'},
+  recu_store:{color:'#0c5460',bg:'#d1ecf1'}, arrive_maroc:{color:'#155724',bg:'#D4EDDA'},
+  disponible_retrait:{color:'#533F03',bg:'#FFEEBA'}, litige:{color:'#721c24',bg:'#F8D7DA'},
 };
 
 export default function StoreDossiers() {
@@ -222,17 +228,15 @@ export default function StoreDossiers() {
 
                   {/* Bouton */}
                   <button
-                    disabled={converting === d.id}
-                    onClick={() => void handleConvert(d.id)}
+                    onClick={() => navigate(`/store/demande/${d.id}`)}
                     style={{
-                      background: converting === d.id ? '#aaa' : C.accent,
+                      background: C.primary,
                       color:'#fff',padding:'8px 16px',borderRadius:7,
                       fontWeight:700,fontSize:13,border:'none',
-                      cursor: converting === d.id ? 'not-allowed' : 'pointer',
-                      whiteSpace:'nowrap',alignSelf:'center',
+                      cursor:'pointer',whiteSpace:'nowrap',alignSelf:'center',
                     }}
                   >
-                    {converting === d.id ? 'Conversion…' : 'Convertir en dossier →'}
+                    Créer un devis →
                   </button>
                 </div>
               ))}

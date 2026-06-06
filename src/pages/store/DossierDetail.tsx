@@ -2,7 +2,17 @@ import { useEffect, useState, FormEvent } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase, getDossierById, getTransporteurs, signOut } from '../../lib/supabase';
 import StoreNav from '../../components/StoreNav';
-import type { Dossier, Transporteur, StatutDossier } from '../../types';
+import type { Dossier, Transporteur, StatutDossier, DevisOfficiel, StatutDevis } from '../../types';
+
+const DEVIS_LABEL: Record<StatutDevis,string> = {
+  brouillon:'Brouillon', envoye:'Envoyé au client', accepte:'Accepté ✅',
+  refuse:'Refusé ❌', expire:'Expiré', modifie:'Modifié',
+};
+const DEVIS_COLOR: Record<StatutDevis,{color:string;bg:string}> = {
+  brouillon:{color:'#666',bg:'#f0f0f0'}, envoye:{color:'#004085',bg:'#CCE5FF'},
+  accepte:{color:'#155724',bg:'#D4EDDA'}, refuse:{color:'#721c24',bg:'#F8D7DA'},
+  expire:{color:'#856404',bg:'#FFF3CD'}, modifie:{color:'#0c5460',bg:'#d1ecf1'},
+};
 
 const C = { primary:'#1B4F72', accent:'#E67E22', bg:'#f5f7fa', white:'#fff',
             border:'#dde3ea', error:'#c0392b', success:'#155724' };
@@ -11,6 +21,9 @@ const STATUT_LABEL: Record<StatutDossier,string> = {
   brouillon:'Brouillon', en_attente:'En attente', devis_envoye:'Devis envoyé',
   devis_attente_validation:'À valider', valide:'Validé', paye:'Payé',
   en_transit:'En transit', livre:'Livré', facture_generee:'Facturé', annule:'Annulé',
+  en_attente_paiement:'En attente paiement', en_preparation:'En préparation',
+  recu_store:'Reçu au store', arrive_maroc:'Arrivé au Maroc',
+  disponible_retrait:'Disponible retrait', litige:'Litige',
 };
 const STATUT_COLOR: Record<StatutDossier,{color:string;bg:string}> = {
   brouillon:{color:'#666',bg:'#f0f0f0'},en_attente:{color:'#7B4F00',bg:'#FFF3CD'},
@@ -18,6 +31,9 @@ const STATUT_COLOR: Record<StatutDossier,{color:string;bg:string}> = {
   valide:{color:'#0c5460',bg:'#d1ecf1'},paye:{color:'#155724',bg:'#c3e6cb'},
   en_transit:{color:'#533F03',bg:'#FFEEBA'},livre:{color:'#155724',bg:'#b8dabe'},
   facture_generee:{color:'#4a235a',bg:'#e8d5f5'},annule:{color:'#721c24',bg:'#F8D7DA'},
+  en_attente_paiement:{color:'#7B4F00',bg:'#FFF3CD'}, en_preparation:{color:'#004085',bg:'#CCE5FF'},
+  recu_store:{color:'#0c5460',bg:'#d1ecf1'}, arrive_maroc:{color:'#155724',bg:'#D4EDDA'},
+  disponible_retrait:{color:'#533F03',bg:'#FFEEBA'}, litige:{color:'#721c24',bg:'#F8D7DA'},
 };
 
 export default function StoreDossierDetail() {
@@ -25,6 +41,7 @@ export default function StoreDossierDetail() {
   const navigate = useNavigate();
 
   const [dossier,        setDossier]        = useState<Dossier | null>(null);
+  const [devisOfficiel,  setDevisOfficiel]  = useState<DevisOfficiel | null>(null);
   const [transporteurs,  setTransporteurs]  = useState<Transporteur[]>([]);
   const [loading,        setLoading]        = useState(true);
   const [montantDevis,   setMontantDevis]   = useState('');
@@ -41,7 +58,14 @@ export default function StoreDossierDetail() {
     ]);
     setDossier(d as Dossier ?? null);
     setTransporteurs((trks as Transporteur[]) ?? []);
-    if (d) setMontantDevis(String(d.montant_devis ?? ''));
+    if (d) {
+      setMontantDevis(String(d.montant_devis ?? ''));
+      if ((d as Dossier).devis_officiel_id) {
+        const { data: dv } = await supabase
+          .from('devis_officiels').select('*').eq('id', (d as Dossier).devis_officiel_id!).single();
+        setDevisOfficiel((dv as DevisOfficiel) ?? null);
+      }
+    }
     setLoading(false);
   };
 
@@ -134,8 +158,7 @@ export default function StoreDossierDetail() {
 
   const sc = STATUT_COLOR[dossier.statut] ?? {color:'#333',bg:'#eee'};
   const facture = dossier.factures?.[0];
-  const canAssign  = ['valide','paye','facture_generee'].includes(dossier.statut);
-  const hasTrk     = !!dossier.transporteur_id;
+  const hasTrk  = !!dossier.transporteur_id;
 
   const downloadCMR = async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -150,8 +173,10 @@ export default function StoreDossierDetail() {
     a.download = `cmr-${dossier.numero}.pdf`; a.click();
     URL.revokeObjectURL(url);
   };
-  const canSendDevis = ['en_attente','devis_envoye','devis_attente_validation','brouillon'].includes(dossier.statut);
+  const canSendDevis = ['en_attente','devis_envoye','devis_attente_validation','brouillon'].includes(dossier.statut)
+    && !devisOfficiel;
   const canMarkLivré = dossier.statut === 'en_transit';
+  const canAssign    = ['valide','paye','facture_generee','en_attente_paiement','en_preparation','recu_store'].includes(dossier.statut);
 
   return (
     <div style={{minHeight:'100vh',background:C.bg}}>
@@ -218,6 +243,31 @@ export default function StoreDossierDetail() {
               <Row label="Arrivée" value={dossier.adresse_arrivee}/>
               {dossier.description && <Row label="Description" value={dossier.description}/>}
             </Card>
+
+            {devisOfficiel && (() => {
+              const sc = DEVIS_COLOR[devisOfficiel.statut] ?? {color:'#333',bg:'#eee'};
+              return (
+                <Card title="Devis officiel">
+                  <div style={{marginBottom:8}}>
+                    <span style={{fontWeight:600,fontSize:13,color:C.primary}}>{devisOfficiel.numero}</span>
+                    <span style={{
+                      marginLeft:8,padding:'2px 8px',borderRadius:20,fontSize:11,
+                      fontWeight:600,color:sc.color,background:sc.bg,
+                    }}>
+                      {DEVIS_LABEL[devisOfficiel.statut]}
+                    </span>
+                  </div>
+                  <Row label="Montant HT"  value={`${devisOfficiel.montant_ht.toFixed(2)} €`}/>
+                  <Row label={`TVA ${devisOfficiel.tva_pct}%`} value={`${(devisOfficiel.montant_ttc - devisOfficiel.montant_ht).toFixed(2)} €`}/>
+                  <Row label="Total TTC"   value={`${devisOfficiel.montant_ttc.toFixed(2)} €`}/>
+                  <Row label="Validité"    value={`${devisOfficiel.validite_jours} jours`}/>
+                  {devisOfficiel.envoye_le  && <Row label="Envoyé le"   value={new Date(devisOfficiel.envoye_le).toLocaleDateString('fr-FR')}/>}
+                  {devisOfficiel.accepte_le && <Row label="Accepté le"  value={new Date(devisOfficiel.accepte_le).toLocaleDateString('fr-FR')}/>}
+                  {devisOfficiel.refuse_le  && <Row label="Refusé le"   value={new Date(devisOfficiel.refuse_le).toLocaleDateString('fr-FR')}/>}
+                  {devisOfficiel.notes      && <Row label="Notes"        value={devisOfficiel.notes}/>}
+                </Card>
+              );
+            })()}
 
             {facture && (
               <Card title="Facture">
@@ -316,12 +366,42 @@ export default function StoreDossierDetail() {
             {/* Actions statut */}
             <Card title="Actions">
               <div style={{display:'flex',flexDirection:'column',gap:10}}>
-                {canMarkLivré && (
+                {dossier.statut==='en_attente_paiement' && (
+                  <button onClick={()=>updateStatut('en_preparation')}
+                    style={{background:C.primary,color:'#fff',padding:'10px',borderRadius:7,fontWeight:600,fontSize:14}}>
+                    📦 Passer en préparation
+                  </button>
+                )}
+                {dossier.statut==='en_preparation' && (
+                  <button onClick={()=>updateStatut('recu_store')}
+                    style={{background:C.primary,color:'#fff',padding:'10px',borderRadius:7,fontWeight:600,fontSize:14}}>
+                    🏪 Marquer reçu au store
+                  </button>
+                )}
+                {dossier.statut==='recu_store' && (
+                  <button onClick={()=>updateStatut('en_transit')}
+                    style={{background:'#533F03',color:'#fff',padding:'10px',borderRadius:7,fontWeight:600,fontSize:14}}>
+                    🚛 Mettre en transit
+                  </button>
+                )}
+                {dossier.statut==='en_transit' && (
+                  <button onClick={()=>updateStatut('arrive_maroc')}
+                    style={{background:C.primary,color:'#fff',padding:'10px',borderRadius:7,fontWeight:600,fontSize:14}}>
+                    🇲🇦 Arrivé au Maroc
+                  </button>
+                )}
+                {dossier.statut==='arrive_maroc' && (
+                  <button onClick={()=>updateStatut('disponible_retrait')}
+                    style={{background:C.primary,color:'#fff',padding:'10px',borderRadius:7,fontWeight:600,fontSize:14}}>
+                    📬 Disponible au retrait
+                  </button>
+                )}
+                {canMarkLivré || dossier.statut==='disponible_retrait' ? (
                   <button onClick={()=>updateStatut('livre')}
                     style={{background:'#155724',color:'#fff',padding:'10px',borderRadius:7,fontWeight:600,fontSize:14}}>
                     ✅ Marquer comme livré
                   </button>
-                )}
+                ) : null}
                 {dossier.statut==='en_attente' && (
                   <button onClick={()=>updateStatut('devis_envoye')}
                     style={{background:C.primary,color:'#fff',padding:'10px',borderRadius:7,fontWeight:600,fontSize:14}}>

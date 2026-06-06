@@ -1,16 +1,40 @@
 export type Role = 'client' | 'store' | 'transporter' | 'broker';
 
 export type StatutDossier =
+  // Anciens statuts (backward compat)
   | 'brouillon'
   | 'en_attente'
   | 'devis_envoye'
   | 'devis_attente_validation'
   | 'valide'
   | 'paye'
-  | 'en_transit'
-  | 'livre'
   | 'facture_generee'
-  | 'annule';
+  | 'annule'
+  // Nouveaux statuts workflow
+  | 'en_attente_paiement'
+  | 'en_preparation'
+  | 'recu_store'
+  | 'en_transit'
+  | 'arrive_maroc'
+  | 'disponible_retrait'
+  | 'livre'
+  | 'litige';
+
+export type StatutDemande =
+  | 'nouvelle'
+  | 'en_traitement'
+  | 'devis_envoye'
+  | 'acceptee'
+  | 'refusee'
+  | 'expiree';
+
+export type StatutDevis =
+  | 'brouillon'
+  | 'envoye'
+  | 'accepte'
+  | 'refuse'
+  | 'expire'
+  | 'modifie';
 
 export type TypeColis = 'colis' | 'electromenager' | 'vehicule' | 'autre';
 export type TypeTransporteur = 'camion' | 'courtier';
@@ -26,6 +50,26 @@ export interface Profile {
   created_at: string;
 }
 
+export interface DevisOfficiel {
+  id: string;
+  demande_id: string | null;
+  numero: string;
+  montant_ht: number;
+  tva_pct: number;
+  montant_ttc: number;
+  validite_jours: number;
+  statut: StatutDevis;
+  pdf_url: string | null;
+  notes: string | null;
+  envoye_le: string | null;
+  accepte_le: string | null;
+  refuse_le: string | null;
+  token_acceptation: string | null;
+  token_refus: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Dossier {
   id: string;
   numero: string;
@@ -39,6 +83,9 @@ export interface Dossier {
   adresse_depart: string;
   adresse_arrivee: string;
   montant_devis: number | null;
+  devis_officiel_id: string | null;
+  numero_suivi: string | null;
+  paiement_id: string | null;
   stripe_payment_intent_id: string | null;
   stripe_session_id: string | null;
   paye_le: string | null;
@@ -48,6 +95,7 @@ export interface Dossier {
   transporteur?: Transporteur;
   factures?: Facture[];
   devis_items?: DevisItem[];
+  devis_officiel?: DevisOfficiel;
 }
 
 export interface Transporteur {

@@ -7,16 +7,22 @@ import type { StatutDossier, Dossier } from '../../types';
 const C = { primary: '#1B4F72', accent: '#E67E22', bg: '#f5f7fa', white: '#fff', border: '#dde3ea' };
 
 const STATUT_CONFIG: Record<StatutDossier, { label: string; color: string; bg: string }> = {
-  brouillon:               { label: 'Brouillon',          color: '#666',     bg: '#f0f0f0' },
-  en_attente:              { label: 'En attente',          color: '#7B4F00',  bg: '#FFF3CD' },
-  devis_envoye:            { label: 'Devis envoyé',        color: '#004085',  bg: '#CCE5FF' },
-  devis_attente_validation:{ label: 'Devis à valider',     color: '#155724',  bg: '#D4EDDA' },
-  valide:                  { label: 'Validé',              color: '#0c5460',  bg: '#d1ecf1' },
-  paye:                    { label: 'Payé',                color: '#155724',  bg: '#c3e6cb' },
-  en_transit:              { label: 'En transit',          color: '#533F03',  bg: '#FFEEBA' },
-  livre:                   { label: 'Livré ✓',             color: '#155724',  bg: '#b8dabe' },
-  facture_generee:         { label: 'Facturé',             color: '#4a235a',  bg: '#e8d5f5' },
-  annule:                  { label: 'Annulé',              color: '#721c24',  bg: '#F8D7DA' },
+  brouillon:               { label: 'Brouillon',              color: '#666',    bg: '#f0f0f0' },
+  en_attente:              { label: 'En attente',              color: '#7B4F00', bg: '#FFF3CD' },
+  devis_envoye:            { label: 'Devis envoyé',            color: '#004085', bg: '#CCE5FF' },
+  devis_attente_validation:{ label: 'Devis à valider',         color: '#155724', bg: '#D4EDDA' },
+  valide:                  { label: 'Validé',                  color: '#0c5460', bg: '#d1ecf1' },
+  paye:                    { label: 'Payé ✓',                  color: '#155724', bg: '#c3e6cb' },
+  en_transit:              { label: 'En transit',              color: '#533F03', bg: '#FFEEBA' },
+  livre:                   { label: 'Livré ✓',                 color: '#155724', bg: '#b8dabe' },
+  facture_generee:         { label: 'Facturé',                 color: '#4a235a', bg: '#e8d5f5' },
+  annule:                  { label: 'Annulé',                  color: '#721c24', bg: '#F8D7DA' },
+  en_attente_paiement:     { label: 'En attente de paiement',  color: '#7B4F00', bg: '#FFF3CD' },
+  en_preparation:          { label: 'En préparation',          color: '#004085', bg: '#CCE5FF' },
+  recu_store:              { label: 'Reçu au store',           color: '#0c5460', bg: '#d1ecf1' },
+  arrive_maroc:            { label: 'Arrivé au Maroc 🇲🇦',     color: '#155724', bg: '#D4EDDA' },
+  disponible_retrait:      { label: 'Disponible au retrait',   color: '#533F03', bg: '#FFEEBA' },
+  litige:                  { label: 'Litige ⚠️',              color: '#721c24', bg: '#F8D7DA' },
 };
 
 function Badge({ statut }: { statut: StatutDossier }) {
@@ -66,6 +72,17 @@ function DossierCard({ d }: { d: Dossier }) {
       )}
 
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        {d.statut === 'en_attente_paiement' && (
+          <button
+            onClick={e => { e.stopPropagation(); navigate(`/client/paiement/${d.id}`); }}
+            style={{
+              background: '#635BFF', color: C.white, padding: '7px 16px',
+              borderRadius: 6, fontSize: 13, fontWeight: 600,
+            }}
+          >
+            💳 Payer maintenant
+          </button>
+        )}
         {d.statut === 'devis_attente_validation' && (
           <button
             onClick={e => { e.stopPropagation(); navigate(`/client/dossier/${d.id}`); }}

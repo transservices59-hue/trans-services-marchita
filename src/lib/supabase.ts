@@ -93,6 +93,18 @@ export const toggleTransporteur = (id: string, actif: boolean) =>
 export const getDernieresPositions = () =>
   supabase.from('derniere_position').select('*');
 
+// ─── Demandes publiques ───────────────────────────────────────────────────────
+
+export const getDemande = (id: string) =>
+  supabase.from('demandes_publiques').select('*').eq('id', id).single();
+
+export const getDevisByDemande = (demandeId: string) =>
+  supabase
+    .from('devis_officiels')
+    .select('*')
+    .eq('demande_id', demandeId)
+    .order('created_at', { ascending: false });
+
 export const pushPosition = (data: {
   transporteur_id: string;
   latitude: number;
