@@ -600,32 +600,30 @@ app.post('/api/store/convert-demande', requireAuth, express.json(), async (req, 
     details: { dossierId: dossier.id, email: demande.email, clientProfileId, isNewClient },
   });
 
-  // 5. Email de bienvenue + lien reset password (nouveaux comptes uniquement)
-  if (isNewClient) {
-    const appUrl = process.env.APP_URL ?? 'https://trans-services-marchita.vercel.app';
-    const { data: linkData, error: linkErr } = await supabase.auth.admin.generateLink({
-      type:  'recovery',
-      email: demande.email as string,
-    });
-    if (linkErr) {
-      logger.warn('[convert-demande] generateLink échoué :', linkErr.message);
-    }
-    const resetLink = linkData?.properties?.action_link ?? `${appUrl}/login`;
-
-    await sendEmail({
-      to:     demande.email as string,
-      toName: demande.prenom as string,
-      subject: 'Votre espace Trans Services Marchita est prêt',
-      html: tplBienvenue({
-        prenom:    demande.prenom    as string,
-        email:     demande.email     as string,
-        numero:    dossier.numero    as string,
-        resetLink,
-        appUrl,
-      }),
-    });
-    logger.info(`[convert-demande] Email bienvenue envoyé → ${demande.email as string}`);
+  // 5. Email de bienvenue + lien reset password (toujours, nouveau ou existant)
+  const appUrl = process.env.APP_URL ?? 'https://trans-services-marchita.vercel.app';
+  const { data: linkData, error: linkErr } = await supabase.auth.admin.generateLink({
+    type:  'recovery',
+    email: demande.email as string,
+  });
+  if (linkErr) {
+    logger.warn('[convert-demande] generateLink échoué :', linkErr.message);
   }
+  const resetLink = linkData?.properties?.action_link ?? `${appUrl}/login`;
+
+  await sendEmail({
+    to:      demande.email  as string,
+    toName:  demande.prenom as string,
+    subject: 'Votre espace Trans Services Marchita est prêt',
+    html: tplBienvenue({
+      prenom:    demande.prenom as string,
+      email:     demande.email  as string,
+      numero:    dossier.numero as string,
+      resetLink,
+      appUrl,
+    }),
+  });
+  logger.info(`[convert-demande] Email bienvenue envoyé → ${demande.email as string} (isNewClient=${String(isNewClient)})`);
 
   logger.info(`[convert-demande] Demande ${demandeId} → dossier ${dossier.id as string}`);
   res.json({ ok: true, dossierId: dossier.id });
