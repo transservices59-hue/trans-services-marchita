@@ -277,6 +277,7 @@ app.post('/api/demandes', publicLimiter, express.json(), async (req, res) => {
       const acceptUrl = `${appUrl}/api/devis/accepter?token=${devis.token_acceptation as string}`;
       const refuseUrl = `${appUrl}/api/devis/refuser?token=${devis.token_refus as string}`;
 
+      console.log(`[demandes] → email DEVIS (tplDevisClient) à ${String(email)} | ${numero} | ${resultat.montantTTC} €`);
       await Promise.all([
         sendEmail({
           to:      String(email),
@@ -320,6 +321,7 @@ app.post('/api/demandes', publicLimiter, express.json(), async (req, res) => {
   }
 
   // ── Devis manuel ──────────────────────────────────────────────────────────
+  console.log(`[demandes] → email MANUEL (tplDemandeManuelle) à ${String(email)}`);
   await Promise.all([
     sendEmail({
       to:      String(email),
@@ -1009,26 +1011,31 @@ app.get('/api/devis/accepter', async (req, res) => {
       .update({ statut: 'acceptee', traitee: true }).eq('id', devis.demande_id as string),
   ]);
 
-  // Email bienvenue client (nouveau compte uniquement)
+  // Email confirmation au client — toujours envoyé
+  // Nouveau compte : lien reset password ; compte existant : lien /login direct
+  let resetLink = `${appUrl}/login`;
   if (isNewClient) {
     const { data: linkData } = await supabase.auth.admin.generateLink({
       type: 'recovery', email: demande.email as string,
       options: { redirectTo: `${appUrl}/login` },
     });
-    const resetLink = linkData?.properties?.action_link ?? `${appUrl}/login`;
-    await sendEmail({
-      to:      demande.email as string,
-      toName:  demande.prenom as string,
-      subject: 'Devis accepté — Créez votre espace client',
-      html: tplDevisAccepteClient({
-        prenom:         demande.prenom as string,
-        email:          demande.email  as string,
-        numeroDossier:  dossier.numero as string,
-        resetLink,
-        appUrl,
-      }),
-    });
+    resetLink = linkData?.properties?.action_link ?? `${appUrl}/login`;
   }
+  console.log(`[devis/accepter] → email tplDevisAccepteClient à ${demande.email as string} (isNewClient=${String(isNewClient)})`);
+  await sendEmail({
+    to:      demande.email as string,
+    toName:  demande.prenom as string,
+    subject: isNewClient
+      ? 'Devis accepté — Créez votre espace client'
+      : `Devis accepté — Dossier ${dossier.numero as string} créé`,
+    html: tplDevisAccepteClient({
+      prenom:         demande.prenom as string,
+      email:          demande.email  as string,
+      numeroDossier:  dossier.numero as string,
+      resetLink,
+      appUrl,
+    }),
+  });
 
   // Email store
   const storeEmail = process.env.STORE_ALERT_EMAIL ?? 'trans.services59@gmail.com';
@@ -1260,7 +1267,11 @@ app.delete('/api/rgpd/delete-account', requireAuth, async (req, res) => {
 
 // ── GET /api/test-email — envoie un email de test et retourne la réponse Brevo ─
 
-app.get('/api/test-email', async (_req, res) => {
+app.get('/api/test-email', async (req, res) => {
+  const cronSecret = process.env.CRON_SECRET;
+  if (!cronSecret || req.headers.authorization !== `Bearer ${cronSecret}`) {
+    res.status(401).json({ error: 'Unauthorized — passer Authorization: Bearer CRON_SECRET' }); return;
+  }
   const apiKey = process.env.BREVO_API_KEY;
   const keyInfo = apiKey ? `${apiKey.slice(0, 20)}… (${apiKey.length} chars)` : 'ABSENT';
   logger.info(`[test-email] BREVO_API_KEY = ${keyInfo}`);
@@ -1311,6 +1322,10 @@ app.get('/api/test-email', async (_req, res) => {
 // ── GET /api/test-bienvenue — teste generateLink + email bienvenue ────────────
 
 app.get('/api/test-bienvenue', async (req, res) => {
+  const cronSecret = process.env.CRON_SECRET;
+  if (!cronSecret || req.headers.authorization !== `Bearer ${cronSecret}`) {
+    res.status(401).json({ error: 'Unauthorized — passer Authorization: Bearer CRON_SECRET' }); return;
+  }
   const testEmail = 'cybermons3@gmail.com';
   const appUrl    = getAppUrl(req);
 
