@@ -602,28 +602,36 @@ app.post('/api/store/convert-demande', requireAuth, express.json(), async (req, 
 
   // 5. Email de bienvenue + lien reset password (toujours, nouveau ou existant)
   const appUrl = process.env.APP_URL ?? 'https://trans-services-marchita.vercel.app';
+  const clientEmail = demande.email as string;
+
+  console.log('[convert] generateLink pour :', clientEmail);
   const { data: linkData, error: linkErr } = await supabase.auth.admin.generateLink({
     type:  'recovery',
-    email: demande.email as string,
+    email: clientEmail,
   });
+  console.log('[convert] linkData :', JSON.stringify(linkData));
   if (linkErr) {
+    console.error('[convert] generateLink ERREUR :', JSON.stringify(linkErr));
     logger.warn('[convert-demande] generateLink échoué :', linkErr.message);
   }
   const resetLink = linkData?.properties?.action_link ?? `${appUrl}/login`;
+  console.log('[convert] resetLink :', resetLink);
 
+  console.log('[convert] envoi email bienvenue à :', clientEmail);
   await sendEmail({
-    to:      demande.email  as string,
+    to:      clientEmail,
     toName:  demande.prenom as string,
     subject: 'Votre espace Trans Services Marchita est prêt',
     html: tplBienvenue({
       prenom:    demande.prenom as string,
-      email:     demande.email  as string,
+      email:     clientEmail,
       numero:    dossier.numero as string,
       resetLink,
       appUrl,
     }),
   });
-  logger.info(`[convert-demande] Email bienvenue envoyé → ${demande.email as string} (isNewClient=${String(isNewClient)})`);
+  console.log('[convert] email bienvenue envoyé');
+  logger.info(`[convert-demande] Email bienvenue envoyé → ${clientEmail} (isNewClient=${String(isNewClient)})`);
 
   logger.info(`[convert-demande] Demande ${demandeId} → dossier ${dossier.id as string}`);
   res.json({ ok: true, dossierId: dossier.id });
@@ -835,6 +843,66 @@ app.get('/api/test-email', async (_req, res) => {
     brevoBody,
     keyInfo,
     timestamp:   new Date().toISOString(),
+  });
+});
+
+// ── GET /api/test-bienvenue — teste generateLink + email bienvenue ────────────
+
+app.get('/api/test-bienvenue', async (_req, res) => {
+  const testEmail = 'cybermons3@gmail.com';
+  const appUrl    = process.env.APP_URL ?? 'https://trans-services-marchita.vercel.app';
+
+  // 1. Vérifier la clé Supabase service_role
+  const supabaseKeyInfo = SUPABASE_KEY
+    ? `${SUPABASE_KEY.slice(0, 12)}… (${SUPABASE_KEY.length} chars)`
+    : 'ABSENT';
+  console.log('[test-bienvenue] SUPABASE_SERVICE_KEY :', supabaseKeyInfo);
+
+  // 2. generateLink
+  console.log('[test-bienvenue] generateLink pour :', testEmail);
+  const { data: linkData, error: linkErr } = await supabase.auth.admin.generateLink({
+    type:  'recovery',
+    email: testEmail,
+  });
+  console.log('[test-bienvenue] linkData :', JSON.stringify(linkData));
+  if (linkErr) {
+    console.error('[test-bienvenue] generateLink ERREUR :', JSON.stringify(linkErr));
+  }
+
+  const resetLink = linkData?.properties?.action_link ?? `${appUrl}/login`;
+
+  // 3. sendEmail
+  let emailError: string | null = null;
+  try {
+    console.log('[test-bienvenue] sendEmail à :', testEmail);
+    await sendEmail({
+      to:      testEmail,
+      toName:  'Test',
+      subject: '[TEST BIENVENUE] Votre espace Trans Services Marchita est prêt',
+      html: tplBienvenue({
+        prenom:    'Test',
+        email:     testEmail,
+        numero:    'DOS-TEST-000001',
+        resetLink,
+        appUrl,
+      }),
+    });
+    console.log('[test-bienvenue] sendEmail OK');
+  } catch (err) {
+    emailError = err instanceof Error ? err.message : String(err);
+    console.error('[test-bienvenue] sendEmail ERREUR :', emailError);
+  }
+
+  res.json({
+    supabaseKeyInfo,
+    generateLink: {
+      ok:        !linkErr,
+      error:     linkErr ? JSON.stringify(linkErr) : null,
+      actionLink: linkData?.properties?.action_link ?? null,
+      resetLink,
+    },
+    email: { ok: !emailError, error: emailError, to: testEmail },
+    timestamp: new Date().toISOString(),
   });
 });
 
