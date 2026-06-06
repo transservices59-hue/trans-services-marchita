@@ -246,6 +246,9 @@ app.post('/api/demandes', publicLimiter, express.json(), async (req, res) => {
     poids_kg:    poidsNum,
     description: String(description ?? ''),
   });
+  console.log('[demandes] calcul prix:', resultat
+    ? `${resultat.montantHT} € HT / ${resultat.montantTTC} € TTC (${resultat.detail})`
+    : 'null → devis manuel');
 
   if (resultat) {
     // ── Devis auto ─────────────────────────────────────────────────────────
@@ -277,7 +280,7 @@ app.post('/api/demandes', publicLimiter, express.json(), async (req, res) => {
       const acceptUrl = `${appUrl}/api/devis/accepter?token=${devis.token_acceptation as string}`;
       const refuseUrl = `${appUrl}/api/devis/refuser?token=${devis.token_refus as string}`;
 
-      console.log(`[demandes] → email DEVIS (tplDevisClient) à ${String(email)} | ${numero} | ${resultat.montantTTC} €`);
+      console.log(`[demandes] envoi email devis à: ${String(email)} | devis: ${numero} | ${resultat.montantTTC} € TTC`);
       await Promise.all([
         sendEmail({
           to:      String(email),
@@ -347,6 +350,93 @@ app.post('/api/demandes', publicLimiter, express.json(), async (req, res) => {
 
   logger.info(`[demandes] Demande manuelle ${demande.id as string} créée → ${String(email)}`);
   res.json({ ok: true, devisAuto: false });
+});
+
+// ── GET /api/test-devis-auto — simule soumission formulaire (CRON_SECRET requis)
+
+app.get('/api/test-devis-auto', async (req, res) => {
+  const cronSecret = process.env.CRON_SECRET;
+  if (!cronSecret || req.headers.authorization !== `Bearer ${cronSecret}`) {
+    res.status(401).json({ error: 'Unauthorized — passer Authorization: Bearer CRON_SECRET' }); return;
+  }
+
+  const testPayload = {
+    nom: 'Test', prenom: 'Test', email: 'cybermons3@gmail.com',
+    telephone: '0600000000', type_colis: 'colis', poids_kg: 5,
+    description: 'Test automatique', adresse_depart: '12 rue de Paris, 75001 Paris',
+    adresse_arrivee: 'Av. Mohammed V, Casablanca', statut: 'nouvelle',
+  };
+
+  // Étape 1 : calcul
+  const resultat = calculerDevis({ type_colis: 'colis', poids_kg: 5, description: 'Test' });
+  console.log('[test-devis-auto] calcul:', resultat);
+
+  // Étape 2 : insérer la demande
+  const { data: demande, error: demandeErr } = await supabase
+    .from('demandes_publiques').insert(testPayload).select('id').single();
+
+  if (demandeErr || !demande) {
+    res.status(500).json({ error: demandeErr?.message ?? 'Erreur insertion', resultat }); return;
+  }
+
+  if (!resultat) {
+    res.json({ ok: true, step: 'manuel', devisAuto: false, demandeId: demande.id, resultat }); return;
+  }
+
+  // Étape 3 : créer le devis
+  const year   = new Date().getFullYear();
+  const seq    = String(Math.floor(Math.random() * 999_999) + 1).padStart(6, '0');
+  const numero = `DEV-${year}-${seq}`;
+  const appUrl = getAppUrl(req);
+
+  const { data: devis, error: devisErr } = await supabase
+    .from('devis_officiels')
+    .insert({
+      demande_id: demande.id, numero,
+      montant_ht: resultat.montantHT, tva_pct: 20, montant_ttc: resultat.montantTTC,
+      validite_jours: 7, statut: 'envoye', envoye_le: new Date().toISOString(),
+      token_acceptation: randomUUID(), token_refus: randomUUID(),
+    })
+    .select('token_acceptation, token_refus').single();
+
+  if (devisErr || !devis) {
+    res.status(500).json({ error: devisErr?.message, demandeId: demande.id, resultat }); return;
+  }
+
+  // Étape 4 : envoyer l'email
+  const acceptUrl = `${appUrl}/api/devis/accepter?token=${devis.token_acceptation as string}`;
+  const refuseUrl = `${appUrl}/api/devis/refuser?token=${devis.token_refus as string}`;
+
+  let emailError: string | null = null;
+  try {
+    await sendEmail({
+      to:      testPayload.email,
+      toName:  testPayload.prenom,
+      subject: `[TEST] Votre devis Trans Services Marchita — ${numero}`,
+      html: tplDevisClient({
+        prenom: testPayload.prenom, typeColis: 'colis',
+        adresseDepart: testPayload.adresse_depart, adresseArrivee: testPayload.adresse_arrivee,
+        numeroDevis: numero, montantHT: resultat.montantHT, tvaPct: 20,
+        montantTTC: resultat.montantTTC, validiteJours: 7, acceptUrl, refuseUrl,
+      }),
+    });
+    console.log('[test-devis-auto] email envoyé OK');
+  } catch (err) {
+    emailError = err instanceof Error ? err.message : String(err);
+    console.error('[test-devis-auto] email erreur:', emailError);
+  }
+
+  res.json({
+    ok:        !emailError,
+    devisAuto: true,
+    demandeId: demande.id,
+    devisId:   numero,
+    resultat,
+    email:     { to: testPayload.email, error: emailError },
+    acceptUrl,
+    refuseUrl,
+    timestamp: new Date().toISOString(),
+  });
 });
 
 // ── GET /api/create-checkout — 405 Method Not Allowed ────────────────────────

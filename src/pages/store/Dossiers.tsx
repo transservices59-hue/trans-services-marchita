@@ -57,7 +57,6 @@ export default function StoreDossiers() {
   // ── Demandes publiques ────────────────────────────────────────────────────
   const [demandes,        setDemandes]        = useState<DemandePublique[]>([]);
   const [demandesLoading, setDemandesLoading] = useState(true);
-  const [converting,      setConverting]      = useState<string | null>(null);
 
   const fetchDemandes = useCallback(async () => {
     setDemandesLoading(true);
@@ -71,23 +70,6 @@ export default function StoreDossiers() {
   }, []);
 
   useEffect(() => { void fetchDemandes(); }, [fetchDemandes]);
-
-  const handleConvert = async (demandeId: string) => {
-    setConverting(demandeId);
-    const { data: { session } } = await supabase.auth.getSession();
-    const res = await window.fetch('/api/store/convert-demande', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
-      body:    JSON.stringify({ demandeId }),
-    });
-    const json = await res.json() as { ok?: boolean; dossierId?: string; error?: string };
-    if (json.ok && json.dossierId) {
-      navigate(`/store/dossier/${json.dossierId}`);
-    } else {
-      alert(json.error ?? 'Erreur lors de la conversion');
-      setConverting(null);
-    }
-  };
 
   // ── Cursor pagination ─────────────────────────────────────────────────────
   const [dossiers,    setDossiers]    = useState<Dossier[]>([]);
