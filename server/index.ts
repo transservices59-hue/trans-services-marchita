@@ -1167,7 +1167,7 @@ app.get('/api/test-email', async (_req, res) => {
 
 // ── GET /api/test-bienvenue — teste generateLink + email bienvenue ────────────
 
-app.get('/api/test-bienvenue', async (_req, res) => {
+app.get('/api/test-bienvenue', async (req, res) => {
   const testEmail = 'cybermons3@gmail.com';
   const appUrl    = getAppUrl(req);
 
