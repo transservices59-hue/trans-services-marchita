@@ -93,6 +93,18 @@ export const toggleTransporteur = (id: string, actif: boolean) =>
 export const getDernieresPositions = () =>
   supabase.from('derniere_position').select('*');
 
+export const pushPosition = (data: {
+  transporteur_id: string;
+  latitude: number;
+  longitude: number;
+  precision_m: number;
+  vitesse_kmh: number | null;
+}) =>
+  supabase.from('positions_gps').insert({
+    ...data,
+    created_at: new Date().toISOString(),
+  });
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 export const createDemandePublique = (data: {

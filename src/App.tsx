@@ -18,6 +18,7 @@ import MFAEnroll from './pages/MFAEnroll';
 import LegalPage from './pages/Legal';
 import PrivacyPage from './pages/Privacy';
 import CookieBanner from './components/CookieBanner';
+import TrackerPage from './pages/transporter/Tracker';
 
 export default function App() {
   return (
@@ -55,7 +56,7 @@ export default function App() {
 
         {/* Tracker (rôle : transporter / broker) */}
         <Route path="/tracker" element={<ProtectedRoute allowedRoles={['transporter', 'broker']} />}>
-          <Route index element={<div style={{ padding: '2rem' }}>Tableau de bord transporteur — en construction</div>} />
+          <Route index element={<TrackerPage />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

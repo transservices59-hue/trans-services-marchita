@@ -184,6 +184,12 @@ app.get('/api/pdf/facture/:dossierId', requireAuth, async (req, res) => {
   }
 });
 
+// ── GET /api/create-checkout — 405 Method Not Allowed ────────────────────────
+
+app.get('/api/create-checkout', (_req, res) => {
+  res.status(405).json({ error: 'Method Not Allowed. Use POST.' });
+});
+
 // ── POST /api/create-checkout ─────────────────────────────────────────────────
 
 app.post('/api/create-checkout', checkoutLimiter, express.json(), async (req, res) => {
