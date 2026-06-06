@@ -457,6 +457,72 @@ export function tplBienvenue(params: {
   `);
 }
 
+export function tplDemandeManuelle(params: { prenom: string }): string {
+  return wrapHtml(`
+    <h2 style="margin:0 0 12px;color:${LOGO_COLOR};">Bonjour ${params.prenom},</h2>
+    <p style="color:#555;font-size:15px;line-height:1.6;">
+      Votre demande d'exp&#xe9;dition a bien &#xe9;t&#xe9; re&#xe7;ue.<br>
+      Votre demande n&#xe9;cessite un devis personnalis&#xe9;.<br>
+      Notre &#xe9;quipe vous contactera sous <strong>24&nbsp;heures ouvr&#xe9;es</strong>
+      avec une proposition tarifaire d&#xe9;taill&#xe9;e.
+    </p>
+    <p style="color:#555;font-size:14px;line-height:1.6;margin-top:16px;">
+      Pour toute question urgente :<br>
+      <a href="mailto:trans.services59@gmail.com" style="color:${LOGO_COLOR};font-weight:600;">
+        trans.services59@gmail.com
+      </a>
+    </p>
+  `);
+}
+
+export function tplNouvelleDemandeStore(params: {
+  nom:           string;
+  prenom:        string;
+  email:         string;
+  typeColis:     string;
+  adresseDepart: string;
+  adresseArrivee:string;
+  devisAuto:     boolean;
+  demandeUrl:    string;
+}): string {
+  const badge = params.devisAuto
+    ? `<span style="background:#D4EDDA;color:#155724;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:700;">Devis auto envoy&#xe9;</span>`
+    : `<span style="background:#FFF3CD;color:#856404;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:700;">&#x26a0;&#xfe0f; Devis manuel requis</span>`;
+  return wrapHtml(`
+    <h2 style="margin:0 0 8px;color:${LOGO_COLOR};">&#x1F4E8; Nouvelle demande re&#xe7;ue</h2>
+    <div style="margin-bottom:20px;">${badge}</div>
+    <table width="100%" cellpadding="0" cellspacing="0"
+           style="background:#f0f4f8;border-radius:6px;padding:16px;margin:0 0 20px;">
+      <tr>
+        <td style="font-size:13px;color:#555;">Client</td>
+        <td style="font-size:13px;font-weight:bold;text-align:right;">${params.prenom} ${params.nom}</td>
+      </tr>
+      <tr>
+        <td style="font-size:13px;color:#555;padding-top:8px;">Email</td>
+        <td style="font-size:13px;text-align:right;padding-top:8px;">${params.email}</td>
+      </tr>
+      <tr>
+        <td style="font-size:13px;color:#555;padding-top:8px;">Type de colis</td>
+        <td style="font-size:13px;font-weight:bold;text-align:right;padding-top:8px;text-transform:capitalize;">${params.typeColis}</td>
+      </tr>
+      <tr>
+        <td style="font-size:13px;color:#555;padding-top:8px;">D&#xe9;part</td>
+        <td style="font-size:13px;text-align:right;padding-top:8px;">${params.adresseDepart || '—'}</td>
+      </tr>
+      <tr>
+        <td style="font-size:13px;color:#555;padding-top:8px;">Arriv&#xe9;e</td>
+        <td style="font-size:13px;text-align:right;padding-top:8px;">${params.adresseArrivee || '—'}</td>
+      </tr>
+    </table>
+    ${params.devisAuto
+      ? `<p style="color:#155724;font-size:14px;">Le devis a &#xe9;t&#xe9; envoy&#xe9; automatiquement au client.</p>`
+      : `<p style="color:#856404;font-size:14px;background:#FFF3CD;padding:10px 14px;border-radius:6px;">
+           Ce type de colis n&#xe9;cessite un devis manuel. Connectez-vous pour cr&#xe9;er le devis.
+         </p>`}
+    ${btn('&#x1F4CB;&nbsp;Voir la demande', params.demandeUrl)}
+  `);
+}
+
 // ── Fonction d'envoi centralisée ──────────────────────────────────────────────
 
 export interface EmailPayload {

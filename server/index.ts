@@ -89,7 +89,9 @@ import { createHash, randomUUID } from 'crypto';
 import {
   notifyStatutChange, sendEmail, tplBienvenue,
   tplDevisClient, tplDevisAccepteClient, tplDevisAccepteStore, tplDevisRefuseStore,
+  tplDemandeManuelle, tplNouvelleDemandeStore,
 } from './emails.js';
+import { calculerDevis } from './tarification.js';
 import { checkGPSAlerts, healthCheck } from './monitoring.js';
 import { sendReminders, sendWeeklyReport, runCleanup, notifySMSAssignment } from './automation.js';
 import { logAudit } from './audit.js';
@@ -202,6 +204,147 @@ app.get('/api/pdf/facture/:dossierId', requireAuth, async (req, res) => {
     console.error('[pdf/facture]', msg);
     res.status(500).json({ error: msg });
   }
+});
+
+// ── POST /api/demandes — soumission formulaire public + devis auto ────────────
+
+app.post('/api/demandes', publicLimiter, express.json(), async (req, res) => {
+  const { nom, prenom, email, telephone, type_colis, description,
+          adresse_depart, adresse_arrivee, poids_kg }
+    = req.body as Record<string, string | number | null | undefined>;
+
+  if (!nom || !prenom || !email || !type_colis) {
+    res.status(400).json({ error: 'Champs requis : nom, prenom, email, type_colis' }); return;
+  }
+
+  const poidsNum = poids_kg != null && poids_kg !== '' ? parseFloat(String(poids_kg)) : null;
+
+  // 1. Enregistrer la demande
+  const { data: demande, error: demandeErr } = await supabase
+    .from('demandes_publiques')
+    .insert({
+      nom, prenom, email, telephone: telephone ?? '',
+      type_colis, description: description ?? '',
+      adresse_depart:  adresse_depart  ?? '',
+      adresse_arrivee: adresse_arrivee ?? '',
+      poids_kg: poidsNum,
+      statut: 'nouvelle',
+    })
+    .select('id')
+    .single();
+
+  if (demandeErr || !demande) {
+    res.status(500).json({ error: demandeErr?.message ?? 'Erreur insertion' }); return;
+  }
+
+  const appUrl     = getAppUrl(req);
+  const storeEmail = process.env.STORE_ALERT_EMAIL ?? 'trans.services59@gmail.com';
+
+  // 2. Calcul du devis automatique
+  const resultat = calculerDevis({
+    type_colis:  String(type_colis),
+    poids_kg:    poidsNum,
+    description: String(description ?? ''),
+  });
+
+  if (resultat) {
+    // ── Devis auto ─────────────────────────────────────────────────────────
+    const year   = new Date().getFullYear();
+    const seq    = String(Math.floor(Math.random() * 999_999) + 1).padStart(6, '0');
+    const numero = `DEV-${year}-${seq}`;
+
+    const { data: devis, error: devisErr } = await supabase
+      .from('devis_officiels')
+      .insert({
+        demande_id:        demande.id,
+        numero,
+        montant_ht:        resultat.montantHT,
+        tva_pct:           20,
+        montant_ttc:       resultat.montantTTC,
+        validite_jours:    7,
+        statut:            'envoye',
+        envoye_le:         new Date().toISOString(),
+        token_acceptation: randomUUID(),
+        token_refus:       randomUUID(),
+      })
+      .select('token_acceptation, token_refus')
+      .single();
+
+    if (!devisErr && devis) {
+      await supabase.from('demandes_publiques')
+        .update({ statut: 'devis_envoye' }).eq('id', demande.id as string);
+
+      const acceptUrl = `${appUrl}/api/devis/accepter?token=${devis.token_acceptation as string}`;
+      const refuseUrl = `${appUrl}/api/devis/refuser?token=${devis.token_refus as string}`;
+
+      await Promise.all([
+        sendEmail({
+          to:      String(email),
+          toName:  String(prenom),
+          subject: `Votre devis Trans Services Marchita — ${numero}`,
+          html: tplDevisClient({
+            prenom:         String(prenom),
+            typeColis:      String(type_colis),
+            adresseDepart:  String(adresse_depart  ?? ''),
+            adresseArrivee: String(adresse_arrivee ?? ''),
+            numeroDevis:    numero,
+            montantHT:      resultat.montantHT,
+            tvaPct:         20,
+            montantTTC:     resultat.montantTTC,
+            validiteJours:  7,
+            acceptUrl,
+            refuseUrl,
+          }),
+        }),
+        sendEmail({
+          to:      storeEmail,
+          subject: `Nouvelle demande — ${String(type_colis)} — ${String(adresse_depart ?? '')} → ${String(adresse_arrivee ?? '')}`,
+          html: tplNouvelleDemandeStore({
+            nom:           String(nom),
+            prenom:        String(prenom),
+            email:         String(email),
+            typeColis:     String(type_colis),
+            adresseDepart: String(adresse_depart  ?? ''),
+            adresseArrivee:String(adresse_arrivee ?? ''),
+            devisAuto:     true,
+            demandeUrl:    `${appUrl}/store/demande/${demande.id as string}`,
+          }),
+        }),
+      ]);
+
+      logger.info(`[demandes] Devis auto ${numero} créé + envoyé → ${String(email)}`);
+      res.json({ ok: true, devisAuto: true });
+      return;
+    }
+    // Fallback : devis échoué → traiter comme manuel
+  }
+
+  // ── Devis manuel ──────────────────────────────────────────────────────────
+  await Promise.all([
+    sendEmail({
+      to:      String(email),
+      toName:  String(prenom),
+      subject: 'Votre demande a bien été reçue — Trans Services Marchita',
+      html: tplDemandeManuelle({ prenom: String(prenom) }),
+    }),
+    sendEmail({
+      to:      storeEmail,
+      subject: `Nouvelle demande MANUELLE — ${String(type_colis)} — ${String(adresse_depart ?? '')} → ${String(adresse_arrivee ?? '')}`,
+      html: tplNouvelleDemandeStore({
+        nom:           String(nom),
+        prenom:        String(prenom),
+        email:         String(email),
+        typeColis:     String(type_colis),
+        adresseDepart: String(adresse_depart  ?? ''),
+        adresseArrivee:String(adresse_arrivee ?? ''),
+        devisAuto:     false,
+        demandeUrl:    `${appUrl}/store/demande/${demande.id as string}`,
+      }),
+    }),
+  ]);
+
+  logger.info(`[demandes] Demande manuelle ${demande.id as string} créée → ${String(email)}`);
+  res.json({ ok: true, devisAuto: false });
 });
 
 // ── GET /api/create-checkout — 405 Method Not Allowed ────────────────────────
