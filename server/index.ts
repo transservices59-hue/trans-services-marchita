@@ -58,6 +58,17 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false },
 });
 
+// ── Helper : URL de l'app (évite le fallback codé en dur) ────────────────────
+// Priorité : APP_URL env → x-forwarded-host Vercel → host header → défaut
+function getAppUrl(req: Request): string {
+  if (process.env.APP_URL) return process.env.APP_URL;
+  const host  = (req.headers['x-forwarded-host'] as string | undefined)
+             ?? (req.headers.host as string | undefined)
+             ?? 'app.transservices.fr';
+  const proto = (req.headers['x-forwarded-proto'] as string | undefined) ?? 'https';
+  return `${proto}://${host}`;
+}
+
 // ── Application ───────────────────────────────────────────────────────────────
 
 const app = express();
@@ -608,7 +619,7 @@ app.post('/api/store/convert-demande', requireAuth, express.json(), async (req, 
   });
 
   // 5. Email de bienvenue + lien reset password (toujours, nouveau ou existant)
-  const appUrl = process.env.APP_URL ?? 'https://trans-services-marchita.vercel.app';
+  const appUrl = getAppUrl(req);
   const clientEmail = demande.email as string;
 
   console.log('[convert] generateLink pour :', clientEmail);
@@ -724,7 +735,7 @@ app.post('/api/store/devis/:id/envoyer', requireAuth, async (req, res) => {
     .from('demandes_publiques').select('*').eq('id', devis.demande_id as string).single();
   if (!demande) { res.status(404).json({ error: 'Demande introuvable' }); return; }
 
-  const appUrl = process.env.APP_URL ?? 'https://trans-services-marchita.vercel.app';
+  const appUrl = getAppUrl(req);
   const acceptUrl = `${appUrl}/api/devis/accepter?token=${devis.token_acceptation as string}`;
   const refuseUrl = `${appUrl}/api/devis/refuser?token=${devis.token_refus as string}`;
 
@@ -761,7 +772,7 @@ app.post('/api/store/devis/:id/envoyer', requireAuth, async (req, res) => {
 
 app.get('/api/devis/accepter', async (req, res) => {
   const { token } = req.query as { token?: string };
-  const appUrl    = process.env.APP_URL ?? 'https://trans-services-marchita.vercel.app';
+  const appUrl    = getAppUrl(req);
 
   if (!token) { res.redirect(`${appUrl}/devis-refuse?erreur=lien-invalide`); return; }
 
@@ -897,7 +908,7 @@ app.get('/api/devis/accepter', async (req, res) => {
 
 app.get('/api/devis/refuser', async (req, res) => {
   const { token } = req.query as { token?: string };
-  const appUrl    = process.env.APP_URL ?? 'https://trans-services-marchita.vercel.app';
+  const appUrl    = getAppUrl(req);
 
   if (!token) { res.redirect(`${appUrl}/devis-refuse?erreur=lien-invalide`); return; }
 
@@ -1158,7 +1169,7 @@ app.get('/api/test-email', async (_req, res) => {
 
 app.get('/api/test-bienvenue', async (_req, res) => {
   const testEmail = 'cybermons3@gmail.com';
-  const appUrl    = process.env.APP_URL ?? 'https://trans-services-marchita.vercel.app';
+  const appUrl    = getAppUrl(req);
 
   // 1. Vérifier les deux noms possibles de la clé service_role
   const keyServiceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;

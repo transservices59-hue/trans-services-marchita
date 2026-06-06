@@ -537,7 +537,7 @@ export async function sendEmail(payload: EmailPayload): Promise<void> {
 
 // ── Helpers métier ────────────────────────────────────────────────────────────
 
-const APP_URL = process.env.APP_URL ?? 'https://trans-services-marchita.vercel.app';
+const APP_URL = process.env.APP_URL ?? 'https://app.transservices.fr';
 
 export async function notifyStatutChange(params: {
   statut: string;

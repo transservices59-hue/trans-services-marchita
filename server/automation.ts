@@ -4,7 +4,7 @@ import { logger } from './logger.js';
 
 const SUPABASE_URL = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL ?? '';
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPA_SERVICE_KEY ?? '';
-const APP_URL      = process.env.APP_URL ?? 'https://trans-services-marchita.vercel.app';
+const APP_URL      = process.env.APP_URL ?? 'https://app.transservices.fr';
 const STORE_EMAIL  = process.env.STORE_ALERT_EMAIL ?? 'store@marchita-transport.fr';
 const SMS_SENDER   = process.env.BREVO_SMS_SENDER ?? 'TSMarchita';
 
