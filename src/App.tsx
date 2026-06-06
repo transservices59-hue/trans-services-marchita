@@ -21,6 +21,7 @@ import CookieBanner from './components/CookieBanner';
 import TrackerPage from './pages/transporter/Tracker';
 import DevisAccepte from './pages/DevisAccepte';
 import DevisRefuse from './pages/DevisRefuse';
+import RegisterPage from './pages/RegisterPage';
 import StoreDemande from './pages/store/StoreDemande';
 
 export default function App() {
@@ -36,6 +37,7 @@ export default function App() {
         <Route path="/mfa/enroll" element={<MFAEnroll />} />
         <Route path="/devis-accepte" element={<DevisAccepte />} />
         <Route path="/devis-refuse"  element={<DevisRefuse />} />
+        <Route path="/register"      element={<RegisterPage />} />
 
         {/* Client (rôle : client) */}
         <Route path="/client" element={<ProtectedRoute allowedRoles={['client']} />}>

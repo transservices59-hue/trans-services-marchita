@@ -1059,46 +1059,22 @@ app.get('/api/devis/accepter', async (req, res) => {
     .from('demandes_publiques').select('*').eq('id', devis.demande_id as string).single();
   if (!demande) { res.redirect(`${appUrl}/devis-refuse?erreur=lien-invalide`); return; }
 
-  // Trouver ou créer profil client
-  let clientProfileId: string;
-  let isNewClient = false;
-
+  // Profil existant → on le lie directement ; sinon client_id=null jusqu'à l'inscription
   const { data: existingProfile } = await supabase
-    .from('profiles').select('id').eq('email', demande.email as string).limit(1).maybeSingle();
-
-  if (existingProfile) {
-    clientProfileId = existingProfile.id as string;
-  } else {
-    isNewClient = true;
-    const { data: authData, error: authErr } = await supabase.auth.admin.createUser({
-      email: demande.email as string, password: randomUUID(), email_confirm: true,
-      user_metadata: { nom: demande.nom, prenom: demande.prenom },
-    });
-    if (authErr || !authData.user) {
-      logger.error('[devis/accepter] createUser échoué :', authErr?.message);
-      res.redirect(`${appUrl}/devis-refuse?erreur=lien-invalide`); return;
-    }
-    await supabase.from('profiles')
-      .update({ nom: demande.nom, prenom: demande.prenom, telephone: demande.telephone })
-      .eq('user_id', authData.user.id);
-    const { data: newProfile } = await supabase
-      .from('profiles').select('id').eq('user_id', authData.user.id).single();
-    if (!newProfile) { res.redirect(`${appUrl}/devis-refuse?erreur=lien-invalide`); return; }
-    clientProfileId = newProfile.id as string;
-  }
+    .from('profiles').select('id').ilike('email', demande.email as string).limit(1).maybeSingle();
 
   // Créer le dossier
   const { data: dossier, error: dossierErr } = await supabase
     .from('dossiers')
     .insert({
-      client_id:         clientProfileId,
+      client_id:         existingProfile?.id ?? null,
       statut:            'en_attente_paiement',
       type_colis:        demande.type_colis,
       description:       demande.description  ?? '',
       adresse_depart:    demande.adresse_depart  ?? '',
       adresse_arrivee:   demande.adresse_arrivee ?? '',
       poids_kg:          demande.poids_kg ?? null,
-      montant_devis:     devis.montant_ttc,   // compatibilité Stripe
+      montant_devis:     devis.montant_ttc,
       devis_officiel_id: devis.id,
     })
     .select('id, numero')
@@ -1118,33 +1094,7 @@ app.get('/api/devis/accepter', async (req, res) => {
       .update({ statut: 'acceptee', traitee: true }).eq('id', devis.demande_id as string),
   ]);
 
-  // Email confirmation au client — toujours envoyé
-  // Nouveau compte : lien reset password ; compte existant : lien /login direct
-  let resetLink = `${appUrl}/login`;
-  if (isNewClient) {
-    const { data: linkData } = await supabase.auth.admin.generateLink({
-      type: 'recovery', email: demande.email as string,
-      options: { redirectTo: `${appUrl}/login` },
-    });
-    resetLink = linkData?.properties?.action_link ?? `${appUrl}/login`;
-  }
-  console.log(`[devis/accepter] → email tplDevisAccepteClient à ${demande.email as string} (isNewClient=${String(isNewClient)})`);
-  await sendEmail({
-    to:      demande.email as string,
-    toName:  demande.prenom as string,
-    subject: isNewClient
-      ? 'Devis accepté — Créez votre espace client'
-      : `Devis accepté — Dossier ${dossier.numero as string} créé`,
-    html: tplDevisAccepteClient({
-      prenom:         demande.prenom as string,
-      email:          demande.email  as string,
-      numeroDossier:  dossier.numero as string,
-      resetLink,
-      appUrl,
-    }),
-  });
-
-  // Email store
+  // Notification store uniquement (le client crée son compte via /register)
   const storeEmail = process.env.STORE_ALERT_EMAIL ?? 'trans.services59@gmail.com';
   await sendEmail({
     to:      storeEmail,
@@ -1157,8 +1107,10 @@ app.get('/api/devis/accepter', async (req, res) => {
     }),
   });
 
-  logger.info(`[devis/accepter] Dossier ${dossier.numero as string} créé (isNewClient=${String(isNewClient)})`);
-  res.redirect(`${appUrl}/devis-accepte?numero=${encodeURIComponent(dossier.numero as string)}`);
+  logger.info(`[devis/accepter] Dossier ${dossier.numero as string} créé → ${demande.email as string}`);
+  res.redirect(
+    `${appUrl}/devis-accepte?email=${encodeURIComponent(demande.email as string)}&numero=${encodeURIComponent(dossier.numero as string)}`
+  );
 });
 
 // ── GET /api/devis/refuser?token=xxx — refus client (sans auth) ───────────────
@@ -1211,6 +1163,51 @@ app.get('/api/devis/refuser', async (req, res) => {
 
   logger.info(`[devis/refuser] Devis ${devis.id as string} refusé`);
   res.redirect(`${appUrl}/devis-refuse`);
+});
+
+// ── POST /api/link-dossier — lie un dossier au profil client après inscription ─
+
+app.post('/api/link-dossier', requireAuth, async (req, res) => {
+  const { dossierNumero } = req.body as { dossierNumero?: string };
+  const user = (req as Request & { user: { id: string } }).user;
+
+  if (!dossierNumero) { res.status(400).json({ error: 'dossierNumero requis' }); return; }
+
+  // 1. Profil du client nouvellement inscrit
+  const { data: profile } = await supabase
+    .from('profiles').select('id, nom').eq('user_id', user.id).single();
+  if (!profile) { res.status(404).json({ error: 'Profil introuvable' }); return; }
+
+  // 2. Lier le dossier (uniquement si client_id est encore null)
+  await supabase.from('dossiers')
+    .update({ client_id: profile.id })
+    .eq('numero', dossierNumero)
+    .is('client_id', null);
+
+  // 3. Enrichir le profil (nom/prenom/tel) depuis la demande liée au dossier
+  if (!profile.nom || profile.nom === '') {
+    const { data: dos } = await supabase
+      .from('dossiers').select('devis_officiel_id').eq('numero', dossierNumero).single();
+
+    if (dos?.devis_officiel_id) {
+      const { data: dv } = await supabase
+        .from('devis_officiels').select('demande_id').eq('id', dos.devis_officiel_id).single();
+
+      if (dv?.demande_id) {
+        const { data: dem } = await supabase
+          .from('demandes_publiques').select('nom, prenom, telephone').eq('id', dv.demande_id).single();
+
+        if (dem) {
+          await supabase.from('profiles')
+            .update({ nom: dem.nom, prenom: dem.prenom, telephone: dem.telephone ?? '' })
+            .eq('user_id', user.id);
+        }
+      }
+    }
+  }
+
+  logger.info(`[link-dossier] ${dossierNumero} lié au profil ${profile.id as string}`);
+  res.json({ ok: true });
 });
 
 // ── POST /api/notify/devis-envoye ─────────────────────────────────────────────
@@ -1426,81 +1423,6 @@ app.get('/api/test-email', async (req, res) => {
   });
 });
 
-// ── GET /api/test-bienvenue — teste generateLink + email bienvenue ────────────
-
-app.get('/api/test-bienvenue', async (req, res) => {
-  const cronSecret = process.env.CRON_SECRET;
-  if (!cronSecret || req.headers.authorization !== `Bearer ${cronSecret}`) {
-    res.status(401).json({ error: 'Unauthorized — passer Authorization: Bearer CRON_SECRET' }); return;
-  }
-  const testEmail = 'cybermons3@gmail.com';
-  const appUrl    = getAppUrl(req);
-
-  // 1. Vérifier les deux noms possibles de la clé service_role
-  const keyServiceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const keySupa        = process.env.SUPA_SERVICE_KEY;
-  const supabaseKeyInfo = SUPABASE_KEY
-    ? `${SUPABASE_KEY.slice(0, 20)}… (${SUPABASE_KEY.length} chars)`
-    : 'ABSENT';
-
-  console.log('[test-bienvenue] SUPABASE_SERVICE_ROLE_KEY :', keyServiceRole
-    ? `${keyServiceRole.slice(0, 20)}… (${keyServiceRole.length} chars)` : 'ABSENTE');
-  console.log('[test-bienvenue] SUPA_SERVICE_KEY          :', keySupa
-    ? `${keySupa.slice(0, 20)}… (${keySupa.length} chars)` : 'ABSENTE');
-  console.log('[test-bienvenue] → clé réellement utilisée :', supabaseKeyInfo);
-
-  // 2. generateLink
-  console.log('[test-bienvenue] generateLink pour :', testEmail);
-  const { data: linkData, error: linkErr } = await supabase.auth.admin.generateLink({
-    type:  'recovery',
-    email: testEmail,
-    options: { redirectTo: `${appUrl}/login` },
-  });
-  console.log('[test-bienvenue] linkData :', JSON.stringify(linkData));
-  if (linkErr) {
-    console.error('[test-bienvenue] generateLink ERREUR :', JSON.stringify(linkErr));
-  }
-
-  const resetLink = linkData?.properties?.action_link ?? `${appUrl}/login`;
-
-  // 3. sendEmail
-  let emailError: string | null = null;
-  try {
-    console.log('[test-bienvenue] sendEmail à :', testEmail);
-    await sendEmail({
-      to:      testEmail,
-      toName:  'Test',
-      subject: '[TEST BIENVENUE] Votre espace Trans Services Marchita est prêt',
-      html: tplBienvenue({
-        prenom:    'Test',
-        email:     testEmail,
-        numero:    'DOS-TEST-000001',
-        resetLink,
-        appUrl,
-      }),
-    });
-    console.log('[test-bienvenue] sendEmail OK');
-  } catch (err) {
-    emailError = err instanceof Error ? err.message : String(err);
-    console.error('[test-bienvenue] sendEmail ERREUR :', emailError);
-  }
-
-  res.json({
-    envKeys: {
-      SUPABASE_SERVICE_ROLE_KEY: keyServiceRole ? `${keyServiceRole.slice(0, 20)}… (${keyServiceRole.length} chars)` : 'ABSENTE',
-      SUPA_SERVICE_KEY:          keySupa        ? `${keySupa.slice(0, 20)}… (${keySupa.length} chars)`        : 'ABSENTE',
-      used:                      supabaseKeyInfo,
-    },
-    generateLink: {
-      ok:         !linkErr,
-      error:      linkErr ? JSON.stringify(linkErr) : null,
-      actionLink: linkData?.properties?.action_link ?? null,
-      resetLink,
-    },
-    email: { ok: !emailError, error: emailError, to: testEmail },
-    timestamp: new Date().toISOString(),
-  });
-});
 
 // ── GET /api/health ───────────────────────────────────────────────────────────
 
