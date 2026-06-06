@@ -33,8 +33,12 @@ console.log('  STRIPE_SECRET_KEY      :', STRIPE_SECRET_KEY
 console.log('  STRIPE_WEBHOOK_SECRET  :', STRIPE_WEBHOOK_SECRET
   ? `${STRIPE_WEBHOOK_SECRET.slice(0, 14)}… ✅` : '❌ MANQUANT — webhook inopérant');
 console.log('  SUPABASE_URL           :', SUPABASE_URL    ? `${SUPABASE_URL} ✅`              : '❌ MANQUANT');
-console.log('  SUPABASE_SERVICE_KEY   :', SUPABASE_KEY
-  ? `${SUPABASE_KEY.slice(0, 10)}… ✅`   : '❌ MANQUANT');
+console.log('  SUPABASE_SERVICE_ROLE_KEY :', process.env.SUPABASE_SERVICE_ROLE_KEY
+  ? `${process.env.SUPABASE_SERVICE_ROLE_KEY.slice(0, 20)}… ✅` : '❌ ABSENTE');
+console.log('  SUPA_SERVICE_KEY          :', process.env.SUPA_SERVICE_KEY
+  ? `${process.env.SUPA_SERVICE_KEY.slice(0, 20)}… ✅` : '❌ ABSENTE');
+console.log('  → clé utilisée (SUPABASE_KEY) :', SUPABASE_KEY
+  ? `${SUPABASE_KEY.slice(0, 20)}… ✅`   : '❌ MANQUANT');
 console.log('  BREVO_API_KEY          :', process.env.BREVO_API_KEY
   ? `${process.env.BREVO_API_KEY.slice(0, 20)}… ✅` : '❌ MANQUANT — emails inopérants');
 console.log('[server] ─────────────────────────────────────────────────\n');
@@ -852,11 +856,18 @@ app.get('/api/test-bienvenue', async (_req, res) => {
   const testEmail = 'cybermons3@gmail.com';
   const appUrl    = process.env.APP_URL ?? 'https://trans-services-marchita.vercel.app';
 
-  // 1. Vérifier la clé Supabase service_role
+  // 1. Vérifier les deux noms possibles de la clé service_role
+  const keyServiceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const keySupa        = process.env.SUPA_SERVICE_KEY;
   const supabaseKeyInfo = SUPABASE_KEY
-    ? `${SUPABASE_KEY.slice(0, 12)}… (${SUPABASE_KEY.length} chars)`
+    ? `${SUPABASE_KEY.slice(0, 20)}… (${SUPABASE_KEY.length} chars)`
     : 'ABSENT';
-  console.log('[test-bienvenue] SUPABASE_SERVICE_KEY :', supabaseKeyInfo);
+
+  console.log('[test-bienvenue] SUPABASE_SERVICE_ROLE_KEY :', keyServiceRole
+    ? `${keyServiceRole.slice(0, 20)}… (${keyServiceRole.length} chars)` : 'ABSENTE');
+  console.log('[test-bienvenue] SUPA_SERVICE_KEY          :', keySupa
+    ? `${keySupa.slice(0, 20)}… (${keySupa.length} chars)` : 'ABSENTE');
+  console.log('[test-bienvenue] → clé réellement utilisée :', supabaseKeyInfo);
 
   // 2. generateLink
   console.log('[test-bienvenue] generateLink pour :', testEmail);
@@ -894,10 +905,14 @@ app.get('/api/test-bienvenue', async (_req, res) => {
   }
 
   res.json({
-    supabaseKeyInfo,
+    envKeys: {
+      SUPABASE_SERVICE_ROLE_KEY: keyServiceRole ? `${keyServiceRole.slice(0, 20)}… (${keyServiceRole.length} chars)` : 'ABSENTE',
+      SUPA_SERVICE_KEY:          keySupa        ? `${keySupa.slice(0, 20)}… (${keySupa.length} chars)`        : 'ABSENTE',
+      used:                      supabaseKeyInfo,
+    },
     generateLink: {
-      ok:        !linkErr,
-      error:     linkErr ? JSON.stringify(linkErr) : null,
+      ok:         !linkErr,
+      error:      linkErr ? JSON.stringify(linkErr) : null,
       actionLink: linkData?.properties?.action_link ?? null,
       resetLink,
     },
