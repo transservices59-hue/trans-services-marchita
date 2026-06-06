@@ -1168,23 +1168,33 @@ app.get('/api/devis/refuser', async (req, res) => {
 // ── POST /api/link-dossier — lie un dossier au profil client après inscription ─
 
 app.post('/api/link-dossier', requireAuth, async (req, res) => {
-  const { dossierNumero } = req.body as { dossierNumero?: string };
+  const { dossier: dossierNumero } = req.body as { dossier?: string };
   const user = (req as Request & { user: { id: string } }).user;
 
-  if (!dossierNumero) { res.status(400).json({ error: 'dossierNumero requis' }); return; }
+  if (!dossierNumero) { res.status(400).json({ error: 'dossier requis' }); return; }
 
-  // 1. Profil du client nouvellement inscrit
-  const { data: profile } = await supabase
+  // 1. Profil du client — créer si absent (trigger peut avoir du retard)
+  let { data: profile } = await supabase
     .from('profiles').select('id, nom').eq('user_id', user.id).single();
-  if (!profile) { res.status(404).json({ error: 'Profil introuvable' }); return; }
 
-  // 2. Lier le dossier (uniquement si client_id est encore null)
-  await supabase.from('dossiers')
+  if (!profile) {
+    const { data: newProfile } = await supabase
+      .from('profiles')
+      .insert({ user_id: user.id, email: user.email ?? '', role: 'client' })
+      .select('id, nom').single();
+    profile = newProfile;
+  }
+  if (!profile) { res.status(500).json({ error: 'Profil introuvable ou non créé' }); return; }
+
+  // 2. Lier le dossier (seulement si client_id est encore null)
+  const { data: linked } = await supabase.from('dossiers')
     .update({ client_id: profile.id })
     .eq('numero', dossierNumero)
-    .is('client_id', null);
+    .is('client_id', null)
+    .select('id')
+    .single();
 
-  // 3. Enrichir le profil (nom/prenom/tel) depuis la demande liée au dossier
+  // 3. Enrichir le profil (nom/prenom/tel) depuis la demande liée
   if (!profile.nom || profile.nom === '') {
     const { data: dos } = await supabase
       .from('dossiers').select('devis_officiel_id').eq('numero', dossierNumero).single();
@@ -1207,7 +1217,7 @@ app.post('/api/link-dossier', requireAuth, async (req, res) => {
   }
 
   logger.info(`[link-dossier] ${dossierNumero} lié au profil ${profile.id as string}`);
-  res.json({ ok: true });
+  res.json({ ok: true, dossierId: linked?.id ?? null });
 });
 
 // ── POST /api/notify/devis-envoye ─────────────────────────────────────────────
